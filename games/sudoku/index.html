@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Sudoku</title>
+<style>
+  :root { --bw: min(94vw, 56vh, 480px); }
+  html, body { margin: 0; min-height: 100%; background: #0b0b1a; color: #fff; overflow-x: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    font-family: system-ui, -apple-system, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: calc(env(safe-area-inset-top) + 10px) 0 20px; box-sizing: border-box; }
+  .hidden { display: none !important; }
+  #top { width: var(--bw); display: flex; align-items: center; gap: 10px; }
+  #top a { color: #fff; text-decoration: none; font-size: 26px; opacity: .7; padding: 0 6px; }
+  h1 { margin: 0; flex: 1; font-size: 26px; background: linear-gradient(90deg, #6cf, #5f8);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #info { width: var(--bw); display: flex; justify-content: space-between; font-size: 14px; opacity: .7; margin: 10px 0 8px; font-weight: 600; }
+  #grid { width: var(--bw); aspect-ratio: 1; display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(9, 1fr); background: #6cf;
+    border: 2px solid #6cf; border-radius: 8px; overflow: hidden; gap: 1px; box-sizing: border-box; box-shadow: 0 0 30px rgba(100, 200, 255, .25); }
+  .c { background: #13112e; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative;
+    font-size: calc(var(--bw) / 9 * .55); font-weight: 600; color: #8fd8ff; }
+  .c.given { color: #fff; font-weight: 800; }
+  .c.br { margin-right: 1px; } .c.bb { margin-bottom: 1px; }
+  .c.zone { background: #1d1a45; }
+  .c.same { background: #2c3a78; }
+  .c.sel { background: #3f58c9; }
+  .c.bad { color: #ff5577; }
+  .notes { position: absolute; inset: 2px; display: grid; grid-template-columns: repeat(3, 1fr); font-size: calc(var(--bw) / 9 * .24);
+    color: #9aa3d8; font-weight: 600; }
+  .notes span { display: flex; align-items: center; justify-content: center; }
+  #tools { width: var(--bw); display: flex; justify-content: space-around; margin: 14px 0 8px; }
+  .tool { background: none; border: 0; color: #fff; font: inherit; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; opacity: .85; }
+  .tool span { font-size: 22px; }
+  .tool.on { color: #5f8; opacity: 1; }
+  #pad { width: var(--bw); display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
+  #pad button { font: inherit; font-size: calc(var(--bw) / 9 * .55); font-weight: 600; padding: 8px 0; border: 0; border-radius: 10px;
+    background: #1c1640; color: #8fd8ff; position: relative; }
+  #pad button:active { background: #3f58c9; }
+  #pad button.done { opacity: .25; }
+  .overlay { position: fixed; inset: 0; background: rgba(11, 11, 26, .85); display: flex; align-items: center; justify-content: center; z-index: 5; }
+  .card { background: #1c1640; border-radius: 22px; padding: 24px; width: min(86vw, 360px); text-align: center; display: flex; flex-direction: column; gap: 10px; }
+  .card h2 { margin: 0 0 4px; font-size: 28px; }
+  .card p { margin: 0 0 6px; opacity: .75; }
+  .btn { font: inherit; font-weight: 700; font-size: 17px; padding: 13px; border-radius: 14px; border: 0; background: #2a2360; color: #fff; }
+  .btn.main { background: linear-gradient(90deg, #6cf, #5f8); color: #0b0b1a; }
+  .btn small { display: block; font-weight: 500; font-size: 12px; opacity: .7; }
+</style>
+</head>
+<body>
+<div id="top">
+  <a href="../../">&#8249;</a>
+  <h1>SUDOKU</h1>
+</div>
+<div id="info"><span id="diffLabel"></span><span id="mistakes"></span><span id="timer">0:00</span></div>
+<div id="grid"></div>
+<div id="tools">
+  <button class="tool" id="undoBtn"><span>↶</span>Undo</button>
+  <button class="tool" id="eraseBtn"><span>⌫</span>Erase</button>
+  <button class="tool" id="notesBtn"><span>✎</span>Notes</button>
+  <button class="tool" id="hintBtn"><span>💡</span>Hint</button>
+  <button class="tool" id="newBtn"><span>＋</span>New</button>
+</div>
+<div id="pad"></div>
+
+<div id="newMenu" class="overlay hidden">
+  <div class="card">
+    <h2>New puzzle</h2>
+    <button class="btn" data-diff="easy">Easy<small id="best-easy"></small></button>
+    <button class="btn" data-diff="medium">Medium<small id="best-medium"></small></button>
+    <button class="btn" data-diff="hard">Hard<small id="best-hard"></small></button>
+    <button class="btn" data-diff="expert">Expert<small id="best-expert"></small></button>
+    <button class="btn" id="cancelNew">Cancel</button>
+  </div>
+</div>
+
+<div id="win" class="overlay hidden">
+  <div class="card">
+    <h2>Solved! 🎉</h2>
+    <p id="winText"></p>
+    <button class="btn main" id="winNew">New puzzle</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const DIFF = { easy: 40, medium: 32, hard: 27, expert: 23 }; // how many numbers you start with
+const DIFF_NAME = { easy: 'Easy', medium: 'Medium', hard: 'Hard', expert: 'Expert' };
+
+// ---------- puzzle generator ----------
+const peers = [];
+for (let i = 0; i < 81; i++) {
+  const r = Math.floor(i / 9), c = i % 9, set = new Set();
+  for (let k = 0; k < 9; k++) { set.add(r * 9 + k); set.add(k * 9 + c); }
+  const br = r - r % 3, bc = c - c % 3;
+  for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) set.add((br + a) * 9 + bc + b);
+  set.delete(i);
+  peers.push([...set]);
+}
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function candidates(g, i) {
+  const used = new Set(peers[i].map(p => g[p]));
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(n => !used.has(n));
+}
+
+// Counts solutions (stops at `limit`). Always fills the most constrained cell first, so it's fast.
+function countSolutions(g, limit) {
+  let best = -1, bestC = null;
+  for (let i = 0; i < 81; i++) {
+    if (g[i]) continue;
+    const c = candidates(g, i);
+    if (c.length === 0) return 0;
+    if (!bestC || c.length < bestC.length) { best = i; bestC = c; if (c.length === 1) break; }
+  }
+  if (best < 0) return 1;
+  let n = 0;
+  for (const v of bestC) {
+    g[best] = v;
+    n += countSolutions(g, limit - n);
+    if (n >= limit) break;
+  }
+  g[best] = 0;
+  return n;
+}
+
+function fullGrid() {
+  const g = Array(81).fill(0);
+  (function fill(i) {
+    if (i === 81) return true;
+    for (const v of shuffle(candidates(g, i))) { g[i] = v; if (fill(i + 1)) return true; }
+    g[i] = 0;
+    return false;
+  })(0);
+  return g;
+}
+
+function makePuzzle(diff) {
+  const solution = fullGrid();
+  const puzzle = solution.slice();
+  let filled = 81;
+  for (const i of shuffle([...Array(81).keys()])) {
+    if (filled <= DIFF[diff]) break;
+    const keep = puzzle[i];
+    puzzle[i] = 0;
+    if (countSolutions(puzzle.slice(), 2) !== 1) puzzle[i] = keep; // removing it would allow two answers
+    else filled--;
+  }
+  return { puzzle, solution };
+}
+
+// ---------- game state ----------
+let S; // { diff, puzzle, solution, cells, notes, mistakes, time, done }
+let sel = -1, notesMode = false, undoStack = [];
+
+function newGame(diff) {
+  const { puzzle, solution } = makePuzzle(diff);
+  S = { diff, puzzle, solution, cells: puzzle.slice(), notes: Array.from({ length: 81 }, () => []), mistakes: 0, time: 0, hints: 0, done: false };
+  sel = -1; undoStack = [];
+  save(); render();
+}
+
+function save() { localStorage.setItem('sudokuSave', JSON.stringify(S)); }
+
+function snapshot() {
+  undoStack.push(JSON.stringify({ cells: S.cells, notes: S.notes }));
+  if (undoStack.length > 200) undoStack.shift();
+}
+
+function enter(n) {
+  if (sel < 0 || S.done || S.puzzle[sel]) return;
+  snapshot();
+  if (notesMode) {
+    if (S.cells[sel]) return;
+    const nt = S.notes[sel];
+    S.notes[sel] = nt.includes(n) ? nt.filter(x => x !== n) : [...nt, n].sort();
+  } else {
+    if (S.cells[sel] === n) { S.cells[sel] = 0; }
+    else {
+      S.cells[sel] = n;
+      S.notes[sel] = [];
+      if (n !== S.solution[sel]) {
+        S.mistakes++;
+        if (navigator.vibrate) navigator.vibrate(60);
+      } else {
+        // clear this number from notes in the same row, column and box
+        for (const p of peers[sel]) S.notes[p] = S.notes[p].filter(x => x !== n);
+      }
+    }
+  }
+  checkWin(); save(); render();
+}
+
+function erase() {
+  if (sel < 0 || S.puzzle[sel] || S.done) return;
+  snapshot();
+  S.cells[sel] = 0; S.notes[sel] = [];
+  save(); render();
+}
+
+function undo() {
+  if (!undoStack.length || S.done) return;
+  const u = JSON.parse(undoStack.pop());
+  S.cells = u.cells; S.notes = u.notes;
+  save(); render();
+}
+
+function hint() {
+  if (S.done) return;
+  let i = sel >= 0 && S.cells[sel] !== S.solution[sel] ? sel : -1;
+  if (i < 0) {
+    const open = [...Array(81).keys()].filter(k => S.cells[k] !== S.solution[k]);
+    if (!open.length) return;
+    i = open[Math.floor(Math.random() * open.length)];
+  }
+  snapshot();
+  S.cells[i] = S.solution[i]; S.notes[i] = []; S.hints++;
+  for (const p of peers[i]) S.notes[p] = S.notes[p].filter(x => x !== S.solution[i]);
+  sel = i;
+  checkWin(); save(); render();
+}
+
+function checkWin() {
+  if (S.cells.every((v, i) => v === S.solution[i])) {
+    S.done = true;
+    const bestKey = 'sudokuBest_' + S.diff;
+    const prev = +localStorage.getItem(bestKey) || 0;
+    const isBest = !S.hints && (!prev || S.time < prev);
+    if (isBest) localStorage.setItem(bestKey, S.time);
+    $('winText').textContent = `${DIFF_NAME[S.diff]} in ${fmt(S.time)} · ${S.mistakes} mistake${S.mistakes === 1 ? '' : 's'}` +
+      (S.hints ? ` · ${S.hints} hint${S.hints === 1 ? '' : 's'}` : '') + (isBest ? ' · NEW BEST!' : '');
+    setTimeout(() => $('win').classList.remove('hidden'), 400);
+    if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
+  }
+}
+
+// ---------- drawing ----------
+const gridEl = $('grid'), cellEls = [];
+for (let i = 0; i < 81; i++) {
+  const el = document.createElement('div');
+  el.onclick = () => { sel = i; render(); };
+  gridEl.appendChild(el);
+  cellEls.push(el);
+}
+const padEl = $('pad'), padBtns = [];
+for (let n = 1; n <= 9; n++) {
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.onclick = () => enter(n);
+  padEl.appendChild(b);
+  padBtns.push(b);
+}
+
+function render() {
+  const sr = Math.floor(sel / 9), sc = sel % 9, sv = sel >= 0 ? S.cells[sel] : 0;
+  cellEls.forEach((el, i) => {
+    const r = Math.floor(i / 9), c = i % 9, v = S.cells[i];
+    let cls = 'c';
+    if (c === 2 || c === 5) cls += ' br';
+    if (r === 2 || r === 5) cls += ' bb';
+    if (S.puzzle[i]) cls += ' given';
+    if (sel >= 0 && (r === sr || c === sc || (Math.floor(r / 3) === Math.floor(sr / 3) && Math.floor(c / 3) === Math.floor(sc / 3)))) cls += ' zone';
+    if (sv && v === sv) cls += ' same';
+    if (i === sel) cls += ' sel';
+    if (v && v !== S.solution[i]) cls += ' bad';
+    el.className = cls;
+    if (v) el.textContent = v;
+    else el.innerHTML = S.notes[i].length ? '<div class="notes">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<span>${S.notes[i].includes(n) ? n : ''}</span>`).join('') + '</div>' : '';
+  });
+  // fade numbers that are all placed correctly
+  padBtns.forEach((b, k) => b.classList.toggle('done', S.cells.filter((v, i) => v === k + 1 && v === S.solution[i]).length === 9));
+  $('notesBtn').classList.toggle('on', notesMode);
+  $('diffLabel').textContent = DIFF_NAME[S.diff];
+  $('mistakes').textContent = 'Mistakes: ' + S.mistakes;
+  $('timer').textContent = fmt(S.time);
+}
+
+const fmt = t => Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+
+setInterval(() => {
+  if (!S || S.done || document.hidden || !$('newMenu').classList.contains('hidden')) return;
+  S.time++;
+  $('timer').textContent = fmt(S.time);
+  if (S.time % 5 === 0) save();
+}, 1000);
+
+// ---------- controls ----------
+$('undoBtn').onclick = undo;
+$('eraseBtn').onclick = erase;
+$('notesBtn').onclick = () => { notesMode = !notesMode; render(); };
+$('hintBtn').onclick = hint;
+function openNew() {
+  for (const d in DIFF) {
+    const b = +localStorage.getItem('sudokuBest_' + d);
+    $('best-' + d).textContent = b ? 'Best: ' + fmt(b) : '';
+  }
+  $('cancelNew').classList.toggle('hidden', !S || S.done);
+  $('newMenu').classList.remove('hidden');
+}
+$('newBtn').onclick = openNew;
+$('cancelNew').onclick = () => $('newMenu').classList.add('hidden');
+document.querySelectorAll('[data-diff]').forEach(b => b.onclick = () => {
+  b.innerHTML = 'Making puzzle…';
+  setTimeout(() => {
+    newGame(b.dataset.diff);
+    b.innerHTML = DIFF_NAME[b.dataset.diff] + `<small id="best-${b.dataset.diff}"></small>`;
+    $('newMenu').classList.add('hidden');
+  }, 30);
+});
+$('winNew').onclick = () => { $('win').classList.add('hidden'); openNew(); };
+
+document.addEventListener('keydown', e => {
+  if (e.key >= '1' && e.key <= '9') enter(+e.key);
+  else if (e.key === 'Backspace' || e.key === 'Delete') erase();
+  else if (e.key === 'n') { notesMode = !notesMode; render(); }
+  else if (sel >= 0 && e.key.startsWith('Arrow')) {
+    const d = { ArrowUp: -9, ArrowDown: 9, ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    sel = Math.max(0, Math.min(80, sel + d)); render();
+  }
+});
+
+try { S = JSON.parse(localStorage.getItem('sudokuSave')); } catch (e) {}
+if (S && S.solution && !S.done) render();
+else { S = null; newGame('easy'); openNew(); }
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

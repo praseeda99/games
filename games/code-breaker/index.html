@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Code Breaker</title>
+<style>
+  :root { --w: min(94vw, 420px); }
+  html, body { margin: 0; min-height: 100%; background: #0b0b1a; color: #fff; overflow-x: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    font-family: system-ui, -apple-system, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: calc(env(safe-area-inset-top) + 10px) 0 20px; box-sizing: border-box; }
+  .hidden { display: none !important; }
+  #top { width: var(--w); display: flex; align-items: center; gap: 10px; }
+  #top a { color: #fff; text-decoration: none; font-size: 26px; opacity: .7; padding: 0 6px; }
+  h1 { margin: 0; flex: 1; font-size: 26px; background: linear-gradient(90deg, #fc3, #f55);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #help { background: #1c1640; border: 0; color: #fff; width: 34px; height: 34px; border-radius: 50%; font: inherit; font-weight: 800; }
+  #sub { width: var(--w); font-size: 13px; opacity: .6; margin: 6px 0 10px; display: flex; justify-content: space-between; }
+  #rows { width: var(--w); display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; align-items: center; gap: 10px; background: #13112e; border-radius: 14px; padding: 7px 10px; }
+  .row.cur { background: #231d52; box-shadow: 0 0 0 2px #6a58d8; }
+  .row .n { width: 18px; font-size: 12px; opacity: .45; font-weight: 700; }
+  .pegs { display: flex; gap: 8px; flex: 1; }
+  .peg { width: 34px; height: 34px; border-radius: 50%; background: #0b0b1a; box-shadow: inset 0 2px 4px rgba(0,0,0,.6); }
+  .peg.f { box-shadow: inset 0 -3px 5px rgba(0,0,0,.35), 0 0 10px var(--g); }
+  .row.cur .peg.slot { outline: 2px dashed rgba(255,255,255,.25); outline-offset: -2px; }
+  .fb { display: grid; grid-template-columns: repeat(3, 12px); gap: 4px; }
+  .fb i { width: 12px; height: 12px; border-radius: 50%; background: #2a2650; }
+  .fb i.hit { background: #5f8; box-shadow: 0 0 6px #5f8; }
+  .fb i.near { background: transparent; border: 2px solid #fc3; box-sizing: border-box; }
+  #secret { width: var(--w); display: flex; align-items: center; gap: 10px; background: #1c1640; border-radius: 14px; padding: 7px 10px; margin-top: 10px; box-sizing: border-box; }
+  #secret .peg { display: flex; align-items: center; justify-content: center; font-weight: 800; color: #6a58d8; background: #2a2360; }
+  #palette { width: var(--w); display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 14px 0 10px; }
+  #palette button { width: 46px; height: 46px; border-radius: 50%; border: 0; box-shadow: inset 0 -4px 6px rgba(0,0,0,.35), 0 0 12px var(--g); }
+  #palette button:active { transform: scale(.9); }
+  #actions { display: flex; gap: 10px; }
+  .btn { font: inherit; font-weight: 700; font-size: 16px; padding: 12px 22px; border-radius: 999px; border: 0; background: #1c1640; color: #fff; }
+  .btn.main { background: linear-gradient(90deg, #fc3, #f55); color: #0b0b1a; }
+  .btn:disabled { opacity: .35; }
+  .overlay { position: fixed; inset: 0; background: rgba(11, 11, 26, .85); display: flex; align-items: center; justify-content: center; z-index: 5; padding: 16px; }
+  .card { background: #1c1640; border-radius: 22px; padding: 24px; width: min(86vw, 380px); display: flex; flex-direction: column; gap: 10px; }
+  .card h2 { margin: 0 0 4px; font-size: 26px; text-align: center; }
+  .card p { margin: 0; opacity: .8; line-height: 1.5; font-size: 15px; }
+  .card .btn { border-radius: 14px; }
+  .card .btn small { display: block; font-weight: 500; font-size: 12px; opacity: .7; }
+  .demo { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin: 0 2px; }
+</style>
+</head>
+<body>
+<div id="top">
+  <a href="../../">&#8249;</a>
+  <h1>CODE BREAKER</h1>
+  <button id="help">?</button>
+</div>
+<div id="sub"><span id="modeLabel"></span><span id="stats"></span></div>
+<div id="rows"></div>
+<div id="secret"></div>
+<div id="palette"></div>
+<div id="actions">
+  <button class="btn" id="backBtn">⌫</button>
+  <button class="btn main" id="guessBtn">Check</button>
+  <button class="btn" id="newBtn">New</button>
+</div>
+
+<div id="helpBox" class="overlay hidden">
+  <div class="card">
+    <h2>How to play</h2>
+    <p>A secret code of colors is hidden. Crack it in as few guesses as you can.</p>
+    <p>After each guess you get clues:</p>
+    <p><span class="demo" style="background:#5f8"></span> right color in the <b>right spot</b><br>
+       <span class="demo" style="border:2px solid #fc3;box-sizing:border-box"></span> right color, <b>wrong spot</b></p>
+    <p>The clues are not in order — you have to work out which peg they mean. Tap a placed peg to remove it.</p>
+    <button class="btn main" id="helpClose">Got it</button>
+  </div>
+</div>
+
+<div id="newBox" class="overlay hidden">
+  <div class="card">
+    <h2>New code</h2>
+    <button class="btn" data-mode="easy">Easy<small>4 pegs · 6 colors · no repeats</small></button>
+    <button class="btn" data-mode="normal">Normal<small>4 pegs · 6 colors · repeats allowed</small></button>
+    <button class="btn" data-mode="hard">Hard<small>5 pegs · 8 colors · repeats allowed</small></button>
+    <button class="btn" id="newCancel">Cancel</button>
+  </div>
+</div>
+
+<div id="endBox" class="overlay hidden">
+  <div class="card" style="text-align:center">
+    <h2 id="endTitle"></h2>
+    <p id="endText" style="text-align:center"></p>
+    <button class="btn main" id="endNew">Play again</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const COLORS = ['#ff4d6d', '#ffb020', '#ffe94d', '#4dff88', '#33ccff', '#9d6bff', '#ff7ad9', '#f2f2f2'];
+const MODES = {
+  easy: { name: 'Easy', len: 4, colors: 6, repeats: false, tries: 10 },
+  normal: { name: 'Normal', len: 4, colors: 6, repeats: true, tries: 10 },
+  hard: { name: 'Hard', len: 5, colors: 8, repeats: true, tries: 12 },
+};
+
+let G; // { mode, secret, guesses: [{pegs, hit, near}], cur, over, won }
+
+function newGame(mode) {
+  const m = MODES[mode];
+  const pool = [...Array(m.colors).keys()];
+  const secret = [];
+  while (secret.length < m.len) {
+    const c = pool[Math.floor(Math.random() * pool.length)];
+    if (!m.repeats && secret.includes(c)) continue;
+    secret.push(c);
+  }
+  G = { mode, secret, guesses: [], cur: [], over: false, won: false };
+  save(); render();
+}
+
+function score(guess, secret) {
+  let hit = 0, near = 0;
+  const gl = [], sl = [];
+  guess.forEach((g, i) => { if (g === secret[i]) hit++; else { gl.push(g); sl.push(secret[i]); } });
+  for (const g of gl) { const k = sl.indexOf(g); if (k >= 0) { near++; sl.splice(k, 1); } }
+  return { hit, near };
+}
+
+function pick(c) {
+  const m = MODES[G.mode];
+  if (G.over || G.cur.length >= m.len) return;
+  if (!m.repeats && G.cur.includes(c)) return;
+  G.cur.push(c);
+  if (navigator.vibrate) navigator.vibrate(6);
+  render();
+}
+
+function guess() {
+  const m = MODES[G.mode];
+  if (G.over || G.cur.length !== m.len) return;
+  const r = score(G.cur, G.secret);
+  G.guesses.push({ pegs: G.cur, ...r });
+  G.cur = [];
+  if (r.hit === m.len) end(true);
+  else if (G.guesses.length >= m.tries) end(false);
+  if (navigator.vibrate) navigator.vibrate(r.hit === m.len ? [40, 40, 40] : 15);
+  save(); render();
+}
+
+function end(won) {
+  G.over = true; G.won = won;
+  const st = stats();
+  st.played++;
+  if (won) {
+    st.won++; st.streak++;
+    st.best = Math.min(st.best || 99, G.guesses.length);
+  } else st.streak = 0;
+  localStorage.setItem('codeStats_' + G.mode, JSON.stringify(st));
+  $('endTitle').textContent = won ? 'Cracked it! 🔓' : 'Out of guesses';
+  $('endText').textContent = won
+    ? `${G.guesses.length} guess${G.guesses.length === 1 ? '' : 'es'} · streak ${st.streak}` + (st.best === G.guesses.length ? ' · best ever!' : '')
+    : 'The code is shown below the board.';
+  setTimeout(() => $('endBox').classList.remove('hidden'), 500);
+}
+
+function stats() {
+  try { return JSON.parse(localStorage.getItem('codeStats_' + G.mode)) || { played: 0, won: 0, streak: 0, best: 0 }; }
+  catch (e) { return { played: 0, won: 0, streak: 0, best: 0 }; }
+}
+
+function save() { localStorage.setItem('codeSave', JSON.stringify(G)); }
+
+const peg = c => c === undefined ? '<div class="peg slot"></div>' : `<div class="peg f" style="background:${COLORS[c]};--g:${COLORS[c]}66"></div>`;
+
+function render() {
+  const m = MODES[G.mode];
+  let html = '';
+  for (let i = 0; i < m.tries; i++) {
+    const g = G.guesses[i], isCur = !G.over && i === G.guesses.length;
+    const pegs = g ? g.pegs : isCur ? G.cur : [];
+    let p = '';
+    for (let k = 0; k < m.len; k++) p += pegs[k] !== undefined ? peg(pegs[k]).replace('class="peg f"', `class="peg f" data-k="${k}"`) : '<div class="peg slot"></div>';
+    let fb = '';
+    if (g) {
+      for (let k = 0; k < m.len; k++) fb += `<i class="${k < g.hit ? 'hit' : k < g.hit + g.near ? 'near' : ''}"></i>`;
+    }
+    html += `<div class="row${isCur ? ' cur' : ''}"><span class="n">${i + 1}</span><div class="pegs">${p}</div><div class="fb">${fb}</div></div>`;
+  }
+  $('rows').innerHTML = html;
+  // tap a peg in the current row to remove it
+  $('rows').querySelectorAll('.row.cur .peg.f').forEach(el => el.onclick = () => {
+    G.cur.splice(+el.dataset.k, 1); render();
+  });
+
+  $('secret').innerHTML = '<span class="n" style="width:18px;font-size:16px">🔒</span><div class="pegs">' +
+    G.secret.map(c => G.over ? peg(c) : '<div class="peg">?</div>').join('') + '</div>';
+
+  $('palette').innerHTML = '';
+  for (let c = 0; c < m.colors; c++) {
+    const b = document.createElement('button');
+    b.style.background = COLORS[c];
+    b.style.setProperty('--g', COLORS[c] + '88');
+    b.style.opacity = !m.repeats && G.cur.includes(c) ? .25 : 1;
+    b.onclick = () => pick(c);
+    $('palette').appendChild(b);
+  }
+  $('guessBtn').disabled = G.over || G.cur.length !== m.len;
+  $('backBtn').disabled = G.over || !G.cur.length;
+  $('modeLabel').textContent = m.name + ' · ' + (m.tries - G.guesses.length) + ' guesses left';
+  const st = stats();
+  $('stats').textContent = st.played ? `Won ${st.won}/${st.played} · Best ${st.best || '-'}` : '';
+}
+
+$('backBtn').onclick = () => { G.cur.pop(); render(); };
+$('guessBtn').onclick = guess;
+$('newBtn').onclick = () => { $('newCancel').classList.remove('hidden'); $('newBox').classList.remove('hidden'); };
+$('newCancel').onclick = () => $('newBox').classList.add('hidden');
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { $('newBox').classList.add('hidden'); newGame(b.dataset.mode); });
+$('endNew').onclick = () => { $('endBox').classList.add('hidden'); $('newCancel').classList.add('hidden'); $('newBox').classList.remove('hidden'); };
+$('help').onclick = () => $('helpBox').classList.remove('hidden');
+$('helpClose').onclick = () => { $('helpBox').classList.add('hidden'); localStorage.setItem('codeHelpSeen', 1); };
+
+try { G = JSON.parse(localStorage.getItem('codeSave')); } catch (e) {}
+if (G && MODES[G.mode]) render(); else newGame('normal');
+if (!localStorage.getItem('codeHelpSeen')) $('helpBox').classList.remove('hidden');
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

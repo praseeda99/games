@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Chess</title>
+<style>
+  :root { --bw: min(94vw, 60vh, 520px); }
+  html, body { margin: 0; min-height: 100%; background: #0b0b1a; color: #fff; overflow-x: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    font-family: system-ui, -apple-system, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; padding: calc(env(safe-area-inset-top) + 10px) 0 24px; box-sizing: border-box; }
+  .hidden { display: none !important; }
+  #top { width: var(--bw); display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #top a { color: #fff; text-decoration: none; font-size: 26px; opacity: .7; padding: 0 6px; }
+  h1 { margin: 0; flex: 1; font-size: 26px; background: linear-gradient(90deg, #a9f, #3ff);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #net { font-size: 12px; opacity: .6; }
+
+  /* menu */
+  #menu { width: min(92vw, 420px); display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+  .opt { display: flex; align-items: center; gap: 14px; text-align: left; padding: 16px; border-radius: 18px; border: 1px solid rgba(255,255,255,.08);
+    background: linear-gradient(145deg, #1c1640, #120f2b); color: #fff; font: inherit; }
+  .opt:active { transform: scale(.98); }
+  .opt .e { font-size: 32px; }
+  .opt b { display: block; font-size: 18px; }
+  .opt small { opacity: .6; }
+  .row { display: flex; gap: 8px; }
+  .row button { flex: 1; }
+  .seg { padding: 12px 0; border-radius: 12px; border: 1px solid rgba(255,255,255,.1); background: #120f2b; color: #fff; font: inherit; font-weight: 700; }
+  .seg.on { background: #6a58d8; }
+  #cpuOpts { display: flex; flex-direction: column; gap: 8px; padding: 0 4px; }
+  #cpuOpts p { margin: 6px 0 0; font-size: 13px; opacity: .6; }
+
+  /* game */
+  #game { display: flex; flex-direction: column; align-items: center; }
+  .player { width: var(--bw); display: flex; align-items: center; gap: 8px; height: 34px; font-weight: 700; }
+  .player .caps { flex: 1; font-size: 18px; opacity: .8; letter-spacing: -2px; font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; overflow: hidden; white-space: nowrap; }
+  .player .adv { font-size: 13px; opacity: .6; letter-spacing: 0; }
+  .player .turnDot { width: 10px; height: 10px; border-radius: 50%; background: #5fe0a0; box-shadow: 0 0 10px #5fe0a0; visibility: hidden; }
+  .player.active .turnDot { visibility: visible; }
+  #board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: var(--bw); aspect-ratio: 1; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 40px rgba(120, 90, 255, .35); touch-action: manipulation; }
+  .sq { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; line-height: 1;
+    font-size: calc(var(--bw) / 8 * .8); font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; }
+  .light { background-color: #d4ceff; } .dark { background-color: #6a58d8; }
+  .light.last { background-color: #f3e68f; } .dark.last { background-color: #c7b54b; }
+  .sq.sel { background-color: #5fe0a0 !important; }
+  .sq.check { background-image: radial-gradient(circle, rgba(255, 40, 80, 1) 20%, rgba(255, 40, 80, 0) 72%); }
+  .sq.dot::after { content: ''; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(15, 8, 50, .35); }
+  .sq.ring::after { content: ''; position: absolute; inset: 5%; border-radius: 50%; border: calc(var(--bw) / 90) solid rgba(15, 8, 50, .4); }
+  .pw { color: #fff; -webkit-text-stroke: 1.5px #1d1450; paint-order: stroke fill; text-shadow: 0 2px 3px rgba(0, 0, 0, .35); }
+  .pb { color: #170f3a; text-shadow: 0 1px 1px rgba(255, 255, 255, .25); }
+  .coord { position: absolute; font-size: 10px; font-weight: 800; font-family: system-ui, sans-serif; opacity: .75; }
+  .coord.f { right: 3px; bottom: 1px; } .coord.r { left: 3px; top: 2px; }
+  .light .coord { color: #6a58d8; } .dark .coord { color: #d4ceff; }
+  #status { margin: 10px 0 4px; font-weight: 700; font-size: 17px; min-height: 22px; text-align: center; }
+  #controls { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; justify-content: center; }
+  .btn { font: inherit; font-weight: 700; font-size: 15px; padding: 10px 18px; border-radius: 999px; border: 0; background: #1c1640; color: #fff; }
+  .btn.main { background: linear-gradient(90deg, #a9f, #3ff); color: #0b0b1a; }
+  .btn:active { transform: scale(.96); }
+
+  /* overlays */
+  .overlay { position: fixed; inset: 0; background: rgba(11, 11, 26, .82); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 20px; }
+  .card { background: #1c1640; border-radius: 22px; padding: 24px; width: min(88vw, 380px); text-align: center; display: flex; flex-direction: column; gap: 12px; }
+  .card h2 { margin: 0; font-size: 28px; }
+  .card p { margin: 0; opacity: .75; line-height: 1.45; }
+  #link { font-size: 13px; background: #0b0b1a; border-radius: 10px; padding: 10px; word-break: break-all; -webkit-user-select: all; user-select: all; }
+  #promo .pieces { display: flex; justify-content: center; gap: 8px; }
+  #promo .pieces button { font-size: 46px; width: 64px; height: 64px; border-radius: 14px; border: 0; background: #d4ceff; padding: 0;
+    font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; }
+</style>
+</head>
+<body>
+<div id="top">
+  <a href="../../" id="backLink">&#8249;</a>
+  <h1>CHESS</h1>
+  <span id="net"></span>
+</div>
+
+<div id="menu">
+  <button class="opt" id="continueBtn"><span class="e">▶️</span><span><b>Continue</b><small id="continueSub"></small></span></button>
+  <button class="opt" id="onlineBtn"><span class="e">🌍</span><span><b>Play a friend online</b><small>Send a link to someone far away</small></span></button>
+  <button class="opt" id="localBtn"><span class="e">📱</span><span><b>Pass &amp; play</b><small>Two players, one phone</small></span></button>
+  <button class="opt" id="cpuBtn"><span class="e">🤖</span><span><b>vs Computer</b><small>Practice against the bot</small></span></button>
+  <div id="cpuOpts" class="hidden">
+    <p>Difficulty</p>
+    <div class="row">
+      <button class="seg" data-level="1">Easy</button>
+      <button class="seg on" data-level="2">Medium</button>
+      <button class="seg" data-level="3">Hard</button>
+    </div>
+    <p>Play as</p>
+    <div class="row">
+      <button class="seg on" data-color="w">White</button>
+      <button class="seg" data-color="b">Black</button>
+    </div>
+    <button class="btn main" id="cpuStart" style="margin-top:8px;padding:14px">Start</button>
+  </div>
+</div>
+
+<div id="game" class="hidden">
+  <div class="player" id="topPlayer"><span class="turnDot"></span><span class="name"></span><span class="caps"></span></div>
+  <div id="board"></div>
+  <div class="player" id="botPlayer"><span class="turnDot"></span><span class="name"></span><span class="caps"></span></div>
+  <div id="status"></div>
+  <div id="controls"></div>
+</div>
+
+<div id="share" class="overlay hidden">
+  <div class="card">
+    <h2>Invite a friend</h2>
+    <p>Send this link to your friend. When they open it, you're both in the same game.</p>
+    <div id="link"></div>
+    <button class="btn main" id="shareBtn">Share link</button>
+    <button class="btn" id="copyBtn">Copy link</button>
+    <button class="btn" id="shareClose">Done</button>
+  </div>
+</div>
+
+<div id="promo" class="overlay hidden">
+  <div class="card">
+    <h2>Promote to</h2>
+    <div class="pieces"></div>
+  </div>
+</div>
+
+<div id="result" class="overlay hidden">
+  <div class="card">
+    <h2 id="resTitle"></h2>
+    <p id="resSub"></p>
+    <button class="btn main" id="resAgain"></button>
+    <button class="btn" id="resView">Look at the board</button>
+    <button class="btn" id="resMenu">Menu</button>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const glyph = p => GLYPH[p.toLowerCase()] + '︎';
+const COLOR_NAME = { w: 'White', b: 'Black' };
+const LEVEL_NAME = { 1: 'Easy', 2: 'Medium', 3: 'Hard' };
+
+let mode = null;        // 'local' | 'cpu' | 'online'
+let moves = [];         // e.g. ["e2e4", "e7e5"]
+let game = replay([]);  // { state, history, keys }
+let myColor = 'w';
+let level = 2, cpuColorPick = 'w';
+let selected = -1;
+let thinking = false, aiToken = 0;
+let shownResult = null;
+
+// ---------- board ----------
+const boardEl = $('board');
+const squares = [];
+for (let d = 0; d < 64; d++) {
+  const el = document.createElement('div');
+  el.className = 'sq';
+  el.addEventListener('click', () => tap(viewToSq(d)));
+  boardEl.appendChild(el);
+  squares.push(el);
+}
+const flipped = () => mode !== 'local' && myColor === 'b';
+const viewToSq = d => flipped() ? 63 - d : d;
+
+function legalFrom(sq) {
+  return legalMoves(game.state).filter(m => m.from === sq);
+}
+
+function render() {
+  const s = game.state;
+  const lastStr = moves[moves.length - 1];
+  const last = lastStr ? [sqIndex(lastStr.slice(0, 2)), sqIndex(lastStr.slice(2, 4))] : [];
+  const targets = selected >= 0 ? legalFrom(selected).map(m => m.to) : [];
+  const checkSq = inCheck(s) ? s.b.indexOf(s.turn === 'w' ? 'K' : 'k') : -1;
+
+  squares.forEach((el, d) => {
+    const sq = viewToSq(d), r = sq >> 3, c = sq & 7, p = s.b[sq];
+    let cls = 'sq ' + ((r + c) % 2 ? 'dark' : 'light');
+    if (last.includes(sq)) cls += ' last';
+    if (sq === selected) cls += ' sel';
+    if (sq === checkSq) cls += ' check';
+    if (targets.includes(sq)) cls += p ? ' ring' : ' dot';
+    el.className = cls;
+    let html = p ? `<span class="${colorOf(p) === 'w' ? 'pw' : 'pb'}">${glyph(p)}</span>` : '';
+    if (d % 8 === 0) html += `<span class="coord r">${8 - r}</span>`;
+    if (d >= 56) html += `<span class="coord f">${'abcdefgh'[c]}</span>`;
+    el.innerHTML = html;
+  });
+
+  // Player bars: bottom = you (or White in pass & play)
+  const bottom = flipped() ? 'b' : 'w', top = other(bottom);
+  const names = {
+    local: { w: 'White', b: 'Black' },
+    cpu: { [myColor]: 'You', [other(myColor)]: '🤖 ' + LEVEL_NAME[level] },
+    online: { [myColor]: 'You', [other(myColor)]: net && !net.st?.guest && net.st?.host === myId ? 'Waiting for friend…' : 'Friend' },
+  }[mode] || {};
+  for (const [id, color] of [['topPlayer', top], ['botPlayer', bottom]]) {
+    const el = $(id);
+    el.querySelector('.name').textContent = names[color] || COLOR_NAME[color];
+    el.querySelector('.caps').innerHTML = capturedBy(color);
+    el.classList.toggle('active', s.turn === color && !result());
+  }
+
+  $('status').textContent = statusText();
+  renderControls();
+  checkResult();
+}
+
+function capturedBy(color) {
+  // Pieces of the opposite color that are no longer on the board
+  const start = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+  const theirs = color === 'w' ? 'b' : 'w';
+  const left = {};
+  for (const p of game.state.b) if (p && colorOf(p) === theirs) left[p.toLowerCase()] = (left[p.toLowerCase()] || 0) + 1;
+  let out = '';
+  for (const t of 'qrbnp') for (let i = 0; i < start[t] - (left[t] || 0); i++) out += glyph(t);
+  const mat = side => game.state.b.reduce((sum, p) => sum + (p && colorOf(p) === side ? { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 }[p.toLowerCase()] : 0), 0);
+  const adv = mat(color) - mat(theirs);
+  return out + (adv > 0 ? ` <span class="adv">+${adv}</span>` : '');
+}
+
+function canMoveNow() {
+  if (result()) return false;
+  const t = game.state.turn;
+  if (mode === 'local') return true;
+  if (mode === 'cpu') return t === myColor && !thinking;
+  if (mode === 'online') return net && net.st && myColorOnline() === t;
+  return false;
+}
+
+function tap(sq) {
+  if (!canMoveNow()) return;
+  const s = game.state;
+  if (selected >= 0) {
+    const options = legalFrom(selected).filter(m => m.to === sq);
+    if (options.length) {
+      const from = selected;
+      selected = -1;
+      if (options.length > 1) askPromotion(s.turn, promo => play(sqName(from) + sqName(sq) + promo));
+      else play(moveStr(options[0]));
+      return;
+    }
+  }
+  selected = (s.b[sq] && colorOf(s.b[sq]) === s.turn && sq !== selected) ? sq : -1;
+  render();
+}
+
+function askPromotion(color, done) {
+  const box = $('promo').querySelector('.pieces');
+  box.innerHTML = '';
+  for (const t of 'qrbn') {
+    const b = document.createElement('button');
+    b.innerHTML = `<span class="${color === 'w' ? 'pw' : 'pb'}">${glyph(t)}</span>`;
+    b.onclick = () => { $('promo').classList.add('hidden'); done(t); };
+    box.appendChild(b);
+  }
+  $('promo').classList.remove('hidden');
+}
+
+function play(str) {
+  const next = replay(moves.concat(str));
+  if (!next) return;
+  moves.push(str);
+  game = next;
+  selected = -1;
+  if (navigator.vibrate) navigator.vibrate(12);
+  if (mode === 'online') {
+    net.st = Object.assign({}, net.st, { moves: moves.slice() });
+    saveOnline();
+    publish();
+  } else {
+    saveLocal();
+  }
+  render();
+  if (mode === 'cpu') maybeCpu();
+}
+
+// ---------- results ----------
+function result() {
+  if (mode === 'online' && net && net.st && net.st.resign) {
+    return { over: true, winner: other(net.st.resign), reason: COLOR_NAME[net.st.resign] + ' resigned' };
+  }
+  return gameStatus(game);
+}
+
+function statusText() {
+  const r = result();
+  if (r) return r.winner ? `${COLOR_NAME[r.winner]} wins — ${r.reason}` : `Draw — ${r.reason}`;
+  const s = game.state, chk = inCheck(s) ? ' — Check!' : '';
+  if (mode === 'local') return `${COLOR_NAME[s.turn]} to move${chk}`;
+  if (mode === 'cpu') return (thinking ? 'Computer is thinking…' : 'Your turn') + chk;
+  if (mode === 'online') {
+    if (!net || !net.st) return 'Connecting…';
+    const mine = myColorOnline();
+    if (!mine) return `Watching — ${COLOR_NAME[s.turn]} to move`;
+    if (!net.st.guest && net.st.host === myId) return s.turn === mine ? 'Your move (friend hasn\'t joined yet)' : 'Waiting for your friend…';
+    return (s.turn === mine ? 'Your turn' : 'Friend\'s turn') + chk;
+  }
+  return '';
+}
+
+function checkResult() {
+  const r = result();
+  const key = r ? `${mode}:${net && net.st ? net.st.g : ''}:${moves.length}:${r.reason}` : null;
+  if (!r || shownResult === key) return;
+  shownResult = key;
+  let title;
+  if (!r.winner) title = 'Draw';
+  else if (mode === 'local' || (mode === 'online' && !myColorOnline())) title = `${COLOR_NAME[r.winner]} wins!`;
+  else title = r.winner === myColor ? 'You win! 🎉' : 'You lost';
+  $('resTitle').textContent = title;
+  $('resSub').textContent = r.reason[0].toUpperCase() + r.reason.slice(1);
+  $('resAgain').textContent = mode === 'online' ? 'Rematch (swap colors)' : 'New game';
+  $('resAgain').classList.toggle('hidden', mode === 'online' && !myColorOnline());
+  setTimeout(() => $('result').classList.remove('hidden'), 500);
+  if (mode !== 'online') localStorage.removeItem('chessLocal');
+}
+$('resView').onclick = () => $('result').classList.add('hidden');
+$('resMenu').onclick = () => { $('result').classList.add('hidden'); showMenu(); };
+$('resAgain').onclick = () => {
+  $('result').classList.add('hidden');
+  if (mode === 'online') rematch();
+  else if (mode === 'cpu') startCpu(myColor === 'w' ? 'b' : 'w');
+  else startLocal();
+};
+
+function renderControls() {
+  const c = $('controls');
+  c.innerHTML = '';
+  const add = (label, fn, main) => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (main ? ' main' : '');
+    b.textContent = label;
+    b.onclick = fn;
+    c.appendChild(b);
+  };
+  if (mode === 'online') {
+    add('Invite link', openShare, !net?.st?.guest);
+    if (myColorOnline() && !result()) add('Resign', resign);
+    if (result() && myColorOnline()) add('Rematch', rematch, true);
+  } else {
+    add('Undo', undo);
+    add('New game', () => mode === 'cpu' ? startCpu(myColor) : startLocal());
+  }
+  add('Menu', showMenu);
+}
+
+// ---------- pass & play / computer ----------
+function saveLocal() {
+  localStorage.setItem('chessLocal', JSON.stringify({ mode, moves, myColor, level }));
+}
+
+function startLocal() {
+  enterGame('local', []);
+  myColor = 'w';
+  saveLocal(); render();
+}
+
+function startCpu(color) {
+  enterGame('cpu', []);
+  myColor = color;
+  saveLocal(); render();
+  maybeCpu();
+}
+
+let worker = null;
+function maybeCpu() {
+  if (mode !== 'cpu' || result() || game.state.turn === myColor) return;
+  if (!worker) worker = new Worker('ai-worker.js');
+  thinking = true;
+  const token = ++aiToken;
+  const started = Date.now();
+  render();
+  worker.onmessage = e => {
+    if (token !== aiToken || mode !== 'cpu') return;
+    // small minimum delay so a fast answer still feels like the computer "thought"
+    setTimeout(() => {
+      if (token !== aiToken || mode !== 'cpu') return;
+      thinking = false;
+      if (e.data) play(e.data);
+    }, Math.max(0, 450 - (Date.now() - started)));
+  };
+  worker.postMessage({ moves: moves.slice(), level });
+}
+
+function undo() {
+  if (!moves.length) return;
+  aiToken++; thinking = false;
+  moves.pop();
+  if (mode === 'cpu') {
+    while (moves.length && replay(moves).state.turn !== myColor) moves.pop();
+  }
+  game = replay(moves);
+  selected = -1; shownResult = null;
+  saveLocal(); render();
+  maybeCpu();
+}
+
+// ---------- online (moves are relayed through ntfy.sh, a free public message service) ----------
+const RELAY = 'https://ntfy.sh/';
+const myId = localStorage.getItem('gzPlayerId') || (() => {
+  const id = randId(12);
+  localStorage.setItem('gzPlayerId', id);
+  return id;
+})();
+let net = null; // { room, st, seen, lastId, es, relayHad }
+
+function randId(n) {
+  const a = 'abcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(n));
+  return Array.from(bytes, x => a[x % a.length]).join('');
+}
+const topic = room => 'gamezone-chess-' + room;
+const roomLink = room => location.origin + location.pathname + '?room=' + room;
+
+// Game number g alternates colors so rematches swap sides
+function myColorOnline() {
+  const st = net && net.st;
+  if (!st) return null;
+  const hostColor = st.g % 2 === 0 ? st.hostColor : other(st.hostColor);
+  if (myId === st.host) return hostColor;
+  if (myId === st.guest) return other(hostColor);
+  return null;
+}
+
+// Each message carries the whole game, so the newest one is all anyone needs.
+function progress(st) { return [st.g, st.moves.length, st.resign ? 1 : 0]; }
+function isNewer(a, b) {
+  const pa = progress(a), pb = progress(b);
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] > pb[i];
+  return false;
+}
+function accept(st) {
+  if (!st || !Array.isArray(st.moves) || !st.host) return;
+  const cur = net.st;
+  if (cur && st.host !== cur.host) return;
+  if (!replay(st.moves)) return;
+  if (!cur || isNewer(st, cur)) {
+    net.st = Object.assign({}, st, { guest: st.guest || (cur && cur.guest) || null });
+  } else if (st.guest && !cur.guest) {
+    net.st = Object.assign({}, cur, { guest: st.guest });
+  }
+}
+
+function saveOnline() {
+  if (net && net.st) localStorage.setItem('chessRoom_' + net.room, JSON.stringify(net.st));
+}
+
+function onRaw(d) {
+  if (d.event !== 'message' || net.seen.has(d.id)) return;
+  net.seen.add(d.id);
+  net.lastId = d.id;
+  net.relayHad = true;
+  try {
+    const st = JSON.parse(d.message);
+    if (st.app === 'gzchess') accept(st);
+  } catch (e) {}
+}
+
+let publishTimer = null;
+async function publish() {
+  clearTimeout(publishTimer);
+  if (!net || !net.st) return;
+  const room = net.room;
+  try {
+    const res = await fetch(RELAY + topic(room), { method: 'POST', body: JSON.stringify(Object.assign({ app: 'gzchess', by: myId }, net.st)) });
+    if (!res.ok) throw new Error(res.status);
+    setNet('');
+  } catch (e) {
+    setNet('Not sent — retrying…');
+    publishTimer = setTimeout(() => { if (net && net.room === room) publish(); }, 3000);
+  }
+}
+
+function setNet(t) { $('net').textContent = t; }
+
+function openRoom(room, initial) {
+  closeNet();
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem('chessRoom_' + room)); } catch (e) {}
+  net = { room, st: initial || saved, seen: new Set(), lastId: null, es: null, relayHad: false };
+  localStorage.setItem('chessLastRoom', room);
+  history.replaceState(null, '', '?room=' + room);
+  enterGame('online', net.st ? net.st.moves : []);
+  sync();
+  connect(true);
+}
+
+async function connect(first, tries = 0) {
+  if (!net) return;
+  const room = net.room;
+  setNet('Connecting…');
+  try {
+    const res = await fetch(RELAY + topic(room) + '/json?poll=1&since=all');
+    const text = await res.text();
+    if (!net || net.room !== room) return;
+    for (const line of text.split('\n')) if (line.trim()) onRaw(JSON.parse(line));
+  } catch (e) {
+    setNet('Offline — retrying…');
+    setTimeout(() => { if (net && net.room === room) connect(first); }, 4000);
+    return;
+  }
+  if (!net.st) {
+    // A brand-new game can take a moment to show up on the relay
+    if (tries < 8) {
+      $('status').textContent = 'Finding the game…';
+      setTimeout(() => { if (net && net.room === room) connect(first, tries + 1); }, 1500);
+      return;
+    }
+    $('status').textContent = 'Game not found. Invite links expire 12 hours after the last move — ask your friend for a new one.';
+    setNet('');
+    openStream(); // still listen, in case your friend opens the game again
+    return;
+  }
+  setNet('');
+  // Relay forgot the game (12h expiry) but we remember it: put it back
+  if (first && !net.relayHad) publish();
+  sync();
+  openStream();
+}
+
+function openStream() {
+  if (!net) return;
+  if (net.es) net.es.close();
+  const es = new EventSource(RELAY + topic(net.room) + '/sse?since=' + (net.lastId || 'all'));
+  es.onmessage = e => {
+    try { onRaw(JSON.parse(e.data)); } catch (err) { return; }
+    sync();
+  };
+  es.onopen = () => setNet('');
+  es.onerror = () => setNet('Reconnecting…');
+  net.es = es;
+}
+
+function closeNet() {
+  if (net && net.es) net.es.close();
+  clearTimeout(publishTimer);
+  net = null;
+  setNet('');
+}
+
+// Phones pause background connections; refresh when you come back to the app
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && net && net.st) connect(false);
+});
+
+let lastSyncKey = '';
+function sync() {
+  if (!net || !net.st) return;
+  // First new person to open the link gets the second seat
+  if (net.st.host !== myId && !net.st.guest) {
+    net.st = Object.assign({}, net.st, { guest: myId });
+    publish();
+  }
+  saveOnline();
+  const key = JSON.stringify(net.st);
+  if (key === lastSyncKey && mode === 'online') return;
+  lastSyncKey = key;
+  if (net.st.moves.join() !== moves.join()) {
+    moves = net.st.moves.slice();
+    game = replay(moves);
+    selected = -1;
+    if (navigator.vibrate && game.state.turn === myColorOnline()) navigator.vibrate(30);
+  }
+  myColor = myColorOnline() || 'w';
+  if (!result()) $('result').classList.add('hidden');
+  document.title = (!result() && game.state.turn === myColorOnline() ? '● Your turn — ' : '') + 'Chess';
+  render();
+}
+
+function createRoom() {
+  const room = randId(8);
+  const st = { host: myId, guest: null, hostColor: 'w', g: 0, moves: [], resign: null };
+  openRoom(room, st); // connecting sends the new game to the relay
+  openShare();
+}
+
+function resign() {
+  if (!confirm('Resign this game?')) return;
+  net.st = Object.assign({}, net.st, { resign: myColorOnline() });
+  publish(); sync();
+}
+
+function rematch() {
+  if (!result()) return; // friend already started the rematch
+  net.st = Object.assign({}, net.st, { g: net.st.g + 1, moves: [], resign: null });
+  shownResult = null;
+  publish(); sync();
+}
+
+function openShare() {
+  $('link').textContent = roomLink(net.room);
+  $('shareBtn').classList.toggle('hidden', !navigator.share);
+  $('share').classList.remove('hidden');
+}
+$('shareBtn').onclick = () => navigator.share({ title: 'Play chess with me', text: 'Play chess with me ♟', url: roomLink(net.room) }).catch(() => {});
+$('copyBtn').onclick = async () => {
+  try { await navigator.clipboard.writeText(roomLink(net.room)); $('copyBtn').textContent = 'Copied!'; }
+  catch (e) { $('copyBtn').textContent = 'Press & hold the link to copy'; }
+  setTimeout(() => $('copyBtn').textContent = 'Copy link', 2000);
+};
+$('shareClose').onclick = () => $('share').classList.add('hidden');
+
+// ---------- screens ----------
+function enterGame(m, mv) {
+  aiToken++; thinking = false;
+  mode = m;
+  moves = mv.slice();
+  game = replay(moves) || replay([]);
+  selected = -1; shownResult = null; lastSyncKey = '';
+  $('menu').classList.add('hidden');
+  $('game').classList.remove('hidden');
+}
+
+function showMenu() {
+  aiToken++; thinking = false;
+  if (mode === 'online') history.replaceState(null, '', location.pathname);
+  closeNet();
+  mode = null;
+  document.title = 'Chess';
+  $('game').classList.add('hidden');
+  $('menu').classList.remove('hidden');
+  $('cpuOpts').classList.add('hidden');
+
+  // "Continue" picks up whatever you were last doing
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem('chessLocal')); } catch (e) {}
+  const room = localStorage.getItem('chessLastRoom');
+  const cont = $('continueBtn');
+  if (room && localStorage.getItem('chessRoom_' + room)) {
+    $('continueSub').textContent = 'Your online game';
+    cont.onclick = () => openRoom(room);
+    cont.classList.remove('hidden');
+  } else if (local && local.moves.length) {
+    $('continueSub').textContent = local.mode === 'cpu' ? 'vs Computer (' + LEVEL_NAME[local.level] + ')' : 'Pass & play';
+    cont.onclick = () => {
+      level = local.level || 2;
+      enterGame(local.mode, local.moves);
+      myColor = local.myColor || 'w';
+      render(); maybeCpu();
+    };
+    cont.classList.remove('hidden');
+  } else {
+    cont.classList.add('hidden');
+  }
+}
+
+$('onlineBtn').onclick = createRoom;
+$('localBtn').onclick = startLocal;
+$('cpuBtn').onclick = () => $('cpuOpts').classList.toggle('hidden');
+document.querySelectorAll('[data-level]').forEach(b => b.onclick = () => {
+  level = +b.dataset.level;
+  document.querySelectorAll('[data-level]').forEach(x => x.classList.toggle('on', x === b));
+});
+document.querySelectorAll('[data-color]').forEach(b => b.onclick = () => {
+  cpuColorPick = b.dataset.color;
+  document.querySelectorAll('[data-color]').forEach(x => x.classList.toggle('on', x === b));
+});
+$('cpuStart').onclick = () => startCpu(cpuColorPick);
+
+const roomParam = new URLSearchParams(location.search).get('room');
+if (roomParam && /^[a-z0-9]{4,20}$/.test(roomParam)) openRoom(roomParam);
+else showMenu();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

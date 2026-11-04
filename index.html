@@ -16,7 +16,7 @@
     padding: calc(env(safe-area-inset-top) + 24px) 20px 40px; box-sizing: border-box; }
   h1 { margin: 0 0 6px; font-size: 38px;
     background: linear-gradient(90deg, #3ff, #f3f); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .sub { opacity: .6; margin: 0 0 28px; }
+  .sub { opacity: .6; margin: 0 0 24px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
   .card { display: block; text-decoration: none; color: #fff; border-radius: 20px; padding: 20px 16px;
     background: linear-gradient(145deg, #1c1640, #120f2b); border: 1px solid rgba(255, 255, 255, .08); }
@@ -25,6 +25,11 @@
   .name { font-weight: 800; font-size: 18px; margin-top: 10px; }
   .desc { font-size: 13px; opacity: .6; margin-top: 4px; }
   .best { font-size: 12px; margin-top: 8px; color: #3ff; }
+  .section { font-size: 15px; text-transform: uppercase; letter-spacing: 1.5px; opacity: .55; margin: 26px 0 12px; }
+  .section:first-of-type { margin-top: 0; }
+  .card { position: relative; }
+  .tag { position: absolute; top: 12px; right: 12px; font-size: 10px; font-weight: 800; letter-spacing: 1px;
+    padding: 3px 7px; border-radius: 999px; background: #5fe0a0; color: #0b0b1a; }
 </style>
 </head>
 <body>
@@ -33,23 +38,35 @@
 <div class="grid" id="grid"></div>
 
 <script>
-// To add a game: make a folder in games/ and add an entry here.
-const GAMES = [
-  { id: 'neon-dodge', name: 'Neon Dodge', emoji: '🟣', desc: 'Dodge orbs, grab stars', bestKey: 'neonDodgeBest' },
-  { id: 'snake', name: 'Neon Snake', emoji: '🐍', desc: 'Swipe, eat, grow', bestKey: 'snakeBest' },
-  { id: 'merge', name: 'Merge', emoji: '🔢', desc: 'Slide & merge to 2048', bestKey: 'mergeBest' },
-  { id: 'tug-war', name: 'Tap War', emoji: '⚔️', desc: '2 players, 1 phone' },
+// To add a game: make a folder in games/ and add an entry to a section here.
+const SECTIONS = [
+  { title: 'Play with friends', games: [
+    { id: 'chess', name: 'Chess', emoji: '♟️', desc: 'Online with a friend, or vs the computer', tag: 'ONLINE' },
+    { id: 'tug-war', name: 'Tap War', emoji: '⚔️', desc: '2 players, 1 phone' },
+  ]},
+  { title: 'Brain games', games: [
+    { id: 'sudoku', name: 'Sudoku', emoji: '🧩', desc: 'Fresh puzzle every time' },
+    { id: 'code-breaker', name: 'Code Breaker', emoji: '🔐', desc: 'Crack the secret color code' },
+    { id: 'merge', name: 'Merge', emoji: '🔢', desc: 'Slide & merge to 2048', bestKey: 'mergeBest' },
+  ]},
+  { title: 'Arcade', games: [
+    { id: 'neon-dodge', name: 'Neon Dodge', emoji: '🟣', desc: 'Dodge orbs, grab stars', bestKey: 'neonDodgeBest' },
+    { id: 'snake', name: 'Neon Snake', emoji: '🐍', desc: 'Swipe, eat, grow', bestKey: 'snakeBest' },
+  ]},
 ];
 
-document.getElementById('grid').innerHTML = GAMES.map(g => {
-  const best = localStorage.getItem(g.bestKey);
-  return `<a class="card" href="games/${g.id}/">
-    <div class="emoji">${g.emoji}</div>
-    <div class="name">${g.name}</div>
-    <div class="desc">${g.desc}</div>
-    ${best ? `<div class="best">Best: ${best}</div>` : ''}
-  </a>`;
-}).join('');
+document.getElementById('grid').outerHTML = SECTIONS.map(s => `
+  <h2 class="section">${s.title}</h2>
+  <div class="grid">${s.games.map(g => {
+    const best = g.bestKey && localStorage.getItem(g.bestKey);
+    return `<a class="card" href="games/${g.id}/">
+      ${g.tag ? `<span class="tag">${g.tag}</span>` : ''}
+      <div class="emoji">${g.emoji}</div>
+      <div class="name">${g.name}</div>
+      <div class="desc">${g.desc}</div>
+      ${best ? `<div class="best">Best: ${best}</div>` : ''}
+    </a>`;
+  }).join('')}</div>`).join('');
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
