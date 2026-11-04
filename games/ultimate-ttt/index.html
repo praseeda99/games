@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Ultimate Tic-Tac-Toe</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #3ff; --b: #f3f; }
+  #big { width: var(--w); aspect-ratio: 1; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 8px; }
+  .small { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); gap: 3px;
+    background: #13112e; border-radius: 10px; padding: 4px; border: 2px solid transparent; transition: border-color .2s, opacity .2s; min-width: 0; min-height: 0; }
+  .small.active { border-color: #fff; box-shadow: 0 0 14px rgba(255, 255, 255, .35); }
+  .small.dim { opacity: .45; }
+  .c { background: #1f1b48; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: 900;
+    font-size: calc(var(--w) / 9 * .6); min-width: 0; min-height: 0; line-height: 1; }
+  .c.s0 { color: #3ff; text-shadow: 0 0 8px #3ff; } .c.s1 { color: #f3f; text-shadow: 0 0 8px #f3f; }
+  .c.last { background: #3a3480; }
+  .won { position: absolute; inset: 0; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-weight: 900;
+    font-size: calc(var(--w) / 3 * .75); background: rgba(11, 11, 26, .78); line-height: 1; }
+  .won.s0 { color: #3ff; text-shadow: 0 0 20px #3ff; } .won.s1 { color: #f3f; text-shadow: 0 0 20px #f3f; } .won.d { color: #888; font-size: calc(var(--w) / 3 * .3); }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+const MARK = ['X', 'O'];
+
+function lineWinner(cells) {
+  for (const [a, b, c] of LINES) if (cells[a] >= 0 && cells[a] < 2 && cells[a] === cells[b] && cells[a] === cells[c]) return cells[a];
+  return -1;
+}
+// small[k]: -1 open, 0/1 won, 2 full with no winner
+function legal(s) {
+  if (s.win >= 0 || s.done) return [];
+  const boards = s.next >= 0 ? [s.next] : [0, 1, 2, 3, 4, 5, 6, 7, 8].filter(k => s.small[k] === -1);
+  const out = [];
+  for (const k of boards) for (let p = 0; p < 9; p++) if (s.b[k * 9 + p] < 0) out.push(k * 9 + p);
+  return out;
+}
+function put(s, cell, side) {
+  const b = s.b.slice(), small = s.small.slice();
+  b[cell] = side;
+  const k = Math.floor(cell / 9), p = cell % 9;
+  const sub = b.slice(k * 9, k * 9 + 9);
+  const w = lineWinner(sub);
+  if (w >= 0) small[k] = w;
+  else if (sub.every(x => x >= 0)) small[k] = 2;
+  const win = lineWinner(small);
+  const next = small[p] === -1 ? p : -1;
+  const ns = { b, small, next, last: cell, n: s.n + 1, win, done: false };
+  ns.done = win < 0 && !legal(ns).length;
+  return ns;
+}
+
+// ---------- computer ----------
+function evaluate(s, side) {
+  if (s.win === side) return 10000;
+  if (s.win === 1 - side) return -10000;
+  let v = 0;
+  const lineScore = (cells, me) => {
+    let t = 0;
+    for (const L of LINES) {
+      const mine = L.filter(i => cells[i] === me).length, theirs = L.filter(i => cells[i] === 1 - me).length, dead = L.some(i => cells[i] === 2);
+      if (dead || (mine && theirs)) continue;
+      t += mine === 2 ? 6 : mine === 1 ? 1 : 0;
+      t -= theirs === 2 ? 6 : theirs === 1 ? 1 : 0;
+    }
+    return t;
+  };
+  v += 25 * lineScore(s.small, side);
+  for (let k = 0; k < 9; k++) {
+    const w = k === 4 ? 1.5 : [0, 2, 6, 8].includes(k) ? 1.2 : 1;
+    if (s.small[k] === side) v += 40 * w; else if (s.small[k] === 1 - side) v -= 40 * w;
+    else if (s.small[k] === -1) v += lineScore(s.b.slice(k * 9, k * 9 + 9), side) * w;
+  }
+  return v;
+}
+function search(s, side, depth, alpha, beta) {
+  const ms = legal(s);
+  if (s.win >= 0 || !ms.length || depth === 0) return evaluate(s, side);
+  if (ms.length > 20) depth = Math.min(depth, 1); // "play anywhere" positions branch too much to look far
+  let best = -Infinity;
+  for (const m of ms) {
+    const v = -search(put(s, m, side), 1 - side, depth - 1, -beta, -alpha);
+    if (v > best) best = v;
+    if (v > alpha) alpha = v;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+let api, cells = [], smalls = [];
+
+GZ.turnGame({
+  id: 'uttt',
+  title: 'Ultimate Tic-Tac-Toe',
+  sides: [{ name: 'X', color: '#3ff' }, { name: 'O', color: '#f3f' }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>9 small tic-tac-toe boards make one big board.</li><li>Win a small board by getting 3 in a row in it.</li>
+    <li><b>The twist:</b> the square you pick sends your friend to that board. Play top-right → they must play in the top-right board.</li>
+    <li>If that board is already finished, they can play anywhere.</li><li>Win 3 small boards in a row to win the game!</li></ul>`,
+
+  init: () => ({ b: new Array(81).fill(-1), small: new Array(9).fill(-1), next: -1, last: -1, n: 0, win: -1, done: false }),
+  turn: s => s.n % 2,
+  apply: (s, cell, side) => legal(s).includes(cell) ? put(s, cell, side) : null,
+  result(s) {
+    if (s.win >= 0) return { winner: s.win, reason: '3 boards in a row' };
+    if (s.done) return { winner: null, reason: 'no moves left' };
+    return null;
+  },
+  score: s => [0, 1].map(i => s.small.filter(x => x === i).length),
+  ai(s, side, level) {
+    const ms = legal(s);
+    if (level === 0 && Math.random() < 0.5) return ms[Math.floor(Math.random() * ms.length)];
+    let depth = [1, 2, 4][level];
+    if (ms.length > 20) depth = Math.min(depth, 2);
+    let best = ms[0], bestV = -Infinity;
+    for (const m of ms) {
+      const v = -search(put(s, m, side), 1 - side, depth - 1, -Infinity, Infinity) + Math.random() * 3;
+      if (v > bestV) { bestV = v; best = m; }
+    }
+    return best;
+  },
+
+  mount(stage, a) {
+    api = a;
+    const big = document.createElement('div');
+    big.id = 'big';
+    for (let k = 0; k < 9; k++) {
+      const sm = document.createElement('div');
+      sm.className = 'small';
+      for (let p = 0; p < 9; p++) {
+        const c = document.createElement('div');
+        c.className = 'c';
+        c.onclick = () => api.play(k * 9 + p);
+        sm.appendChild(c);
+        cells[k * 9 + p] = c;
+      }
+      const won = document.createElement('div');
+      sm.appendChild(won);
+      big.appendChild(sm);
+      smalls.push(sm);
+    }
+    stage.appendChild(big);
+  },
+  draw(s, v) {
+    const ms = new Set(legal(s).map(c => Math.floor(c / 9)));
+    smalls.forEach((sm, k) => {
+      sm.className = 'small' + (v.canPlay && ms.has(k) ? ' active' : '') + (s.small[k] === -1 && !ms.has(k) && !this.result(s) ? ' dim' : '');
+      const w = sm.lastChild;
+      w.className = s.small[k] === -1 ? '' : 'won ' + (s.small[k] === 2 ? 'd' : 's' + s.small[k]);
+      w.textContent = s.small[k] === -1 ? '' : s.small[k] === 2 ? 'draw' : MARK[s.small[k]];
+    });
+    cells.forEach((c, i) => {
+      c.className = 'c' + (s.b[i] >= 0 ? ' s' + s.b[i] : '') + (i === s.last ? ' last' : '');
+      c.textContent = s.b[i] >= 0 ? MARK[s.b[i]] : '';
+    });
+  },
+});
+</script>
+</body>
+</html>

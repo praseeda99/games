@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Liar's Dice</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ff4d6d; --b: #ffb020; --w: min(94vw, 440px); }
+  .panel { width: var(--w); background: #13112e; border-radius: 18px; padding: 12px; box-sizing: border-box; margin-bottom: 10px; }
+  .panel h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: 1px; text-transform: uppercase; opacity: .6; }
+  .dice { display: flex; gap: 8px; flex-wrap: wrap; min-height: 46px; align-items: center; }
+  .die { width: 46px; height: 46px; border-radius: 10px; background: #fff; color: #1a1040; display: flex; align-items: center; justify-content: center;
+    font-size: 40px; line-height: 1; box-shadow: 0 3px 0 #bbb; }
+  .die.hide { background: #3a3470; color: #8f88d8; box-shadow: 0 3px 0 #241f52; font-size: 22px; font-weight: 800; }
+  .die.match { background: #ffd23f; box-shadow: 0 3px 0 #c9a21f, 0 0 12px #ffd23f; }
+  .die.lost { opacity: .2; }
+  #bids { display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; }
+  .bid { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+  .bid .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .bid .face { font-size: 26px; line-height: 1; }
+  #picker { display: flex; flex-direction: column; gap: 10px; }
+  .qty { display: flex; align-items: center; gap: 12px; justify-content: center; }
+  .qty button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: #2a2360; font-size: 22px; font-weight: 800; }
+  .qty b { font-size: 30px; min-width: 40px; text-align: center; }
+  .faces { display: flex; gap: 6px; justify-content: center; }
+  .faces button { width: 50px; height: 50px; border-radius: 10px; border: 0; background: #fff; color: #1a1040; font-size: 42px; line-height: 1; padding: 0; opacity: .5; }
+  .faces button.on { opacity: 1; box-shadow: 0 0 0 3px var(--b); }
+  .faces button:disabled { opacity: .15; }
+  .acts { display: flex; gap: 8px; }
+  .acts .btn { flex: 1; padding: 14px; font-size: 17px; }
+  .liar { background: linear-gradient(90deg, #ff4d6d, #ff7a3a) !important; color: #fff !important; }
+  #reveal p { margin: 4px 0 0; font-size: 15px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const FACE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+const START_DICE = 5;
+
+// Dice for each round come from the shared seed, so both phones agree without sending them
+function rollDice(seed, round, side, count) {
+  const r = GZ.rng(seed + ':dice:' + round + ':' + side);
+  return Array.from({ length: count }, () => 1 + Math.floor(r() * 6)).sort();
+}
+// 1s are wild: they count as any face
+const countFace = (dice, f) => dice.filter(d => d === f || d === 1).length;
+
+function higher(bid, last) {
+  if (!last) return true;
+  return bid.q > last.q || (bid.q === last.q && bid.f > last.f);
+}
+
+// ---------- computer ----------
+function chance(need, n) { // P(at least `need` matches among n unknown dice), each match 1/3
+  if (need <= 0) return 1;
+  if (need > n) return 0;
+  let p = 0;
+  const comb = (a, b) => { let r = 1; for (let i = 0; i < b; i++) r = r * (a - i) / (i + 1); return r; };
+  for (let k = need; k <= n; k++) p += comb(n, k) * Math.pow(1 / 3, k) * Math.pow(2 / 3, n - k);
+  return p;
+}
+function aiMove(s, side, level) {
+  const mine = rollDice(s.seed, s.round, side, s.dice[side]);
+  const unknown = s.dice[1 - side];
+  const last = s.bids[s.bids.length - 1];
+  const doubt = [0.25, 0.4, 0.5][level];
+  if (last && chance(last.q - countFace(mine, last.f), unknown) < doubt) return 'L';
+  // consider a few next bids and pick the most believable one
+  const total = s.dice[0] + s.dice[1];
+  const options = [];
+  for (let q = last ? last.q : 1; q <= Math.min(total, (last ? last.q : 1) + 2); q++) {
+    for (let f = 2; f <= 6; f++) {
+      const bid = { q, f };
+      if (!higher(bid, last)) continue;
+      let p = chance(q - countFace(mine, f), unknown);
+      if (level === 2 && Math.random() < 0.12) p += 0.3; // the occasional bluff
+      options.push([bid, p + Math.random() * (level === 0 ? 0.4 : 0.08)]);
+    }
+  }
+  if (!options.length) return 'L';
+  options.sort((a, b) => b[1] - a[1]);
+  if (last && options[0][1] < 0.2) return 'L';
+  return options[0][0];
+}
+
+let api, lastView, pickQ = 1, pickF = 0, pickedFor = '';
+
+GZ.turnGame({
+  id: 'liarsdice',
+  title: "Liar's Dice",
+  sides: [{ name: 'Red', color: '#ff4d6d' }, { name: 'Orange', color: '#ffb020' }],
+  modes: ['online', 'cpu'],
+  help: `<ul><li>You each have 5 hidden dice. You can only see your own.</li>
+    <li>Take turns <b>bidding</b> how many of a face are on the table in total — like "three ⚄".</li>
+    <li><b>⚀ ones are wild</b> — they count as every face.</li>
+    <li>Each bid must be higher: more dice, or the same number of a bigger face.</li>
+    <li>Think they're lying? Call <b>Liar!</b> Everyone shows their dice. If the bid was wrong the bidder loses a die — if it was right, the caller loses one.</li>
+    <li>Lose all your dice and you're out.</li></ul>`,
+
+  init: seed => ({ seed, dice: [START_DICE, START_DICE], round: 0, bids: [], cur: 0, reveal: null }),
+  turn: s => s.cur,
+  apply(s, move, side) {
+    if (this.result(s)) return null;
+    if (move === 'L') {
+      const last = s.bids[s.bids.length - 1];
+      if (!last) return null;
+      const all = [0, 1].map(i => rollDice(s.seed, s.round, i, s.dice[i]));
+      const count = countFace(all[0].concat(all[1]), last.f);
+      const loser = count >= last.q ? side : last.side;
+      const dice = s.dice.slice(); dice[loser]--;
+      return { seed: s.seed, dice, round: s.round + 1, bids: [], cur: loser,
+        reveal: { all, bid: last, count, loser, caller: side } };
+    }
+    if (!move || !Number.isInteger(move.q) || !Number.isInteger(move.f) || move.f < 2 || move.f > 6 || move.q < 1 || move.q > s.dice[0] + s.dice[1]) return null;
+    if (!higher(move, s.bids[s.bids.length - 1])) return null;
+    return Object.assign({}, s, { bids: s.bids.concat({ q: move.q, f: move.f, side }), cur: 1 - side });
+  },
+  result(s) {
+    if (s.dice[0] === 0) return { winner: 1, reason: 'all dice lost' };
+    if (s.dice[1] === 0) return { winner: 0, reason: 'all dice lost' };
+    return null;
+  },
+  score: s => [0, 1].map(i => '🎲' + s.dice[i]),
+  ai: (s, side, level) => aiMove(s, side, level),
+
+  mount(stage, a) {
+    api = a;
+    stage.innerHTML = `
+      <div class="panel" id="reveal"></div>
+      <div class="panel"><h3 id="foeLab">Their dice</h3><div class="dice" id="foeDice"></div></div>
+      <div class="panel"><h3>Bids this round</h3><div id="bids"></div></div>
+      <div class="panel"><h3>Your dice</h3><div class="dice" id="myDice"></div></div>
+      <div class="panel" id="picker">
+        <div class="qty"><button id="qm">−</button><b id="qv">1</b><button id="qp">+</button></div>
+        <div class="faces" id="faces"></div>
+        <div class="acts"><button class="btn main" id="bidBtn">Bid</button><button class="btn liar" id="liarBtn">Liar!</button></div>
+      </div>`;
+    const faces = stage.querySelector('#faces');
+    for (let f = 2; f <= 6; f++) {
+      const b = document.createElement('button');
+      b.textContent = FACE[f];
+      b.dataset.f = f;
+      b.onclick = () => { pickF = f; api.redraw(); };
+      faces.appendChild(b);
+    }
+    stage.querySelector('#qm').onclick = () => { pickQ = Math.max(1, pickQ - 1); api.redraw(); };
+    stage.querySelector('#qp').onclick = () => { pickQ = Math.min(api.state.dice[0] + api.state.dice[1], pickQ + 1); api.redraw(); };
+    stage.querySelector('#bidBtn').onclick = () => { if (pickF) api.play({ q: pickQ, f: pickF }); };
+    stage.querySelector('#liarBtn').onclick = () => api.play('L');
+  },
+  draw(s, v) {
+    lastView = v;
+    const me = v.me === null ? 0 : v.me, foe = 1 - me;
+    const over = !!this.result(s);
+    const name = i => v.mode === 'cpu' ? (i === me ? 'You' : 'Computer') : v.me === null ? this.sides[i].name : i === me ? 'You' : 'Friend';
+    const myDice = rollDice(s.seed, s.round, me, s.dice[me]);
+    const last = s.bids[s.bids.length - 1];
+
+    // reveal box after someone calls Liar
+    const rv = document.getElementById('reveal');
+    if (s.reveal && !s.bids.length) {
+      const R = s.reveal, f = R.bid.f;
+      const show = (i) => R.all[i].map(d => `<div class="die${d === f || d === 1 ? ' match' : ''}">${FACE[d]}</div>`).join('');
+      rv.classList.remove('hidden');
+      rv.innerHTML = `<h3>${name(R.caller)} called Liar!</h3>
+        <div class="dice">${show(me)}</div><div class="dice" style="margin-top:6px">${show(foe)}</div>
+        <p>Bid was <b>${R.bid.q} × ${FACE[f]}</b> — there ${R.count === 1 ? 'was' : 'were'} <b>${R.count}</b>. ${R.count >= R.bid.q ? 'The bid was true.' : 'The bid was a lie!'}
+        <b>${name(R.loser)}</b> ${name(R.loser) === 'You' ? 'lose' : 'loses'} a die.</p>`;
+    } else rv.classList.add('hidden');
+
+    document.getElementById('foeLab').textContent = (name(foe) === 'Friend' || name(foe) === 'Computer' ? name(foe) + "'s" : name(foe) + ' —') + ' dice';
+    document.getElementById('foeDice').innerHTML = over && s.reveal
+      ? s.reveal.all[foe].map(d => `<div class="die">${FACE[d]}</div>`).join('')
+      : Array.from({ length: s.dice[foe] }, () => '<div class="die hide">?</div>').join('') + Array.from({ length: START_DICE - s.dice[foe] }, () => '<div class="die hide lost"></div>').join('');
+    document.getElementById('myDice').innerHTML = v.me === null ? '<span style="opacity:.6">Watching</span>'
+      : myDice.map(d => `<div class="die${last && (d === last.f || d === 1) ? ' match' : ''}">${FACE[d]}</div>`).join('') +
+        Array.from({ length: START_DICE - s.dice[me] }, () => '<div class="die hide lost"></div>').join('');
+    document.getElementById('bids').innerHTML = s.bids.length
+      ? s.bids.map(b => `<div class="bid"><span class="dot" style="background:${this.sides[b.side].color}"></span>${name(b.side)}: <b>${b.q} ×</b><span class="face">${FACE[b.f]}</span></div>`).join('')
+      : `<div style="opacity:.6">${over ? 'Game over' : name(s.cur) + ' ' + (name(s.cur) === 'You' ? 'start' : 'starts') + ' the bidding'}</div>`;
+
+    // bid picker: default to the smallest legal raise
+    const key = s.round + ':' + s.bids.length;
+    if (pickedFor !== key) {
+      pickedFor = key;
+      pickQ = last ? last.q : 1; pickF = 0;
+      if (last && last.f === 6) pickQ = last.q + 1;
+    }
+    document.getElementById('picker').classList.toggle('hidden', !v.canPlay);
+    document.getElementById('qv').textContent = pickQ;
+    document.querySelectorAll('#faces button').forEach(b => {
+      const f = +b.dataset.f;
+      b.disabled = !higher({ q: pickQ, f }, last);
+      if (b.disabled && pickF === f) pickF = 0;
+      b.classList.toggle('on', pickF === f);
+    });
+    const bidBtn = document.getElementById('bidBtn');
+    bidBtn.disabled = !pickF;
+    bidBtn.textContent = pickF ? `Bid ${pickQ} × ${FACE[pickF]}` : 'Pick a face';
+    document.getElementById('liarBtn').disabled = !last;
+  },
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Trivia Battle</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #33ccff; --b: #9d6bff; --w: min(94vw, 440px); }
+  #qn { width: var(--w); display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; opacity: .6; margin-bottom: 8px; }
+  #timer { width: var(--w); height: 6px; background: #1c1640; border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  #timer i { display: block; height: 100%; background: linear-gradient(90deg, var(--a), var(--b)); transition: width .2s linear; }
+  #q { width: var(--w); font-size: 21px; font-weight: 800; line-height: 1.35; min-height: 84px; margin-bottom: 14px; }
+  #opts { width: var(--w); display: flex; flex-direction: column; gap: 10px; }
+  .o { text-align: left; padding: 15px 16px; border-radius: 14px; border: 2px solid #2a2360; background: #1c1640; font-size: 17px; font-weight: 600; display: flex; gap: 10px; align-items: center; }
+  .o .tag { margin-left: auto; font-size: 13px; font-weight: 800; }
+  .o.right { border-color: #2fbf63; background: #164a2d; }
+  .o.wrong { border-color: #ff4d6d; background: #4a1622; }
+  .o:disabled { color: #fff; }
+  #note { width: var(--w); margin-top: 12px; text-align: center; font-weight: 700; min-height: 22px; }
+</style>
+</head>
+<body>
+<script src="questions.js"></script>
+<script src="../shared/turn.js"></script>
+<script>
+const ROUNDS = 10, SECONDS = 20, LETTERS = 'ABCD';
+
+// Both phones pick the same questions and answer order from the shared seed
+function setup(seed) {
+  const r = GZ.rng(seed + ':trivia');
+  const idx = [...QUESTIONS.keys()];
+  for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
+  const qs = idx.slice(0, ROUNDS);
+  const perm = qs.map(() => { const p = [0, 1, 2, 3]; for (let i = 3; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; } return p; });
+  return { qs, perm };
+}
+// Question k is answered by both players; who goes first alternates each question
+const turnOf = n => { const q = Math.floor(n / 2), first = q % 2; return n % 2 === 0 ? first : 1 - first; };
+const isRight = (s, q, a) => a >= 0 && s.perm[q][a] === 0;
+
+let api, lastView, timerStart = 0, timerKey = '', tick = null;
+
+GZ.turnGame({
+  id: 'trivia',
+  title: 'Trivia Battle',
+  sides: [{ name: 'Blue', color: '#33ccff' }, { name: 'Purple', color: '#9d6bff' }],
+  modes: ['online', 'cpu'],
+  help: `<ul><li>${ROUNDS} questions. You both answer the <b>same</b> questions.</li><li>You get ${SECONDS} seconds for each one.</li>
+    <li>You can't see your friend's answer until you've answered too.</li><li>1 point per right answer — most points wins!</li></ul>`,
+
+  init(seed) { const { qs, perm } = setup(seed); return { qs, perm, answers: [] }; },
+  turn: s => turnOf(s.answers.length),
+  apply(s, a, side) {
+    if (s.answers.length >= ROUNDS * 2 || !Number.isInteger(a) || a < -1 || a > 3) return null;
+    return Object.assign({}, s, { answers: s.answers.concat({ side, a, q: Math.floor(s.answers.length / 2) }) });
+  },
+  result(s) {
+    if (s.answers.length < ROUNDS * 2) return null;
+    const [x, y] = this.score(s);
+    return { winner: x === y ? null : x > y ? 0 : 1, reason: `${Math.max(x, y)} to ${Math.min(x, y)}` };
+  },
+  score: s => [0, 1].map(i => s.answers.filter(e => e.side === i && isRight(s, e.q, e.a)).length),
+  status(s, v) {
+    if (this.result(s)) return null;
+    if (v.canPlay) return 'Your turn — pick an answer!';
+    if (v.thinking) return 'Computer is answering…';
+    return null;
+  },
+  ai(s, side, level) {
+    const q = Math.floor(s.answers.length / 2);
+    const correct = s.perm[q].indexOf(0);
+    if (Math.random() < [0.5, 0.7, 0.9][level]) return correct;
+    const wrong = [0, 1, 2, 3].filter(i => i !== correct);
+    return wrong[Math.floor(Math.random() * 3)];
+  },
+
+  mount(stage, a) {
+    api = a;
+    stage.innerHTML = '<div id="qn"><span id="qnum"></span><span id="secs"></span></div><div id="timer"><i></i></div><div id="q"></div><div id="opts"></div><div id="note"></div>';
+    for (let i = 0; i < 4; i++) {
+      const b = document.createElement('button');
+      b.className = 'o';
+      b.onclick = () => api.play(i);
+      stage.querySelector('#opts').appendChild(b);
+    }
+  },
+  draw(s, v) {
+    lastView = v;
+    const me = v.me === null ? 0 : v.me;
+    const name = i => v.mode === 'cpu' ? (i === me ? 'You' : 'Computer') : i === me ? 'You' : 'Friend';
+    const n = s.answers.length, over = n >= ROUNDS * 2;
+    // Show the current question if it's my turn; otherwise show the last question I answered
+    let q, mine = null, theirs = null;
+    if (v.canPlay) q = Math.floor(n / 2);
+    else {
+      const myAns = s.answers.filter(e => e.side === me);
+      q = myAns.length ? myAns[myAns.length - 1].q : Math.floor(n / 2);
+      mine = myAns.length ? myAns[myAns.length - 1] : null;
+      theirs = mine ? s.answers.find(e => e.side !== me && e.q === q) : null;
+    }
+    q = Math.min(q, ROUNDS - 1);
+    const Q = QUESTIONS[s.qs[q]], order = s.perm[q];
+    document.getElementById('qnum').textContent = `Question ${q + 1} of ${ROUNDS}`;
+    document.getElementById('q').textContent = Q[0];
+    const btns = document.querySelectorAll('.o');
+    btns.forEach((b, i) => {
+      const correct = order[i] === 0;
+      const revealed = !v.canPlay && mine;
+      let cls = 'o', tag = '';
+      if (revealed && correct) cls += ' right';
+      if (revealed && mine.a === i && !correct) cls += ' wrong';
+      if (revealed && mine.a === i) tag += 'You ';
+      if (revealed && theirs && theirs.a === i) tag += (tag ? '· ' : '') + name(1 - me);
+      b.className = cls;
+      b.disabled = !v.canPlay;
+      b.innerHTML = `<b>${LETTERS[i]}</b> ${Q[1 + order[i]]}<span class="tag">${tag}</span>`;
+    });
+    let note = '';
+    if (mine && !v.canPlay) {
+      note = mine.a === -1 ? '⏰ Time ran out' : isRight(s, q, mine.a) ? '✅ Correct!' : '❌ Not quite';
+      if (!theirs && !over) note += ` — waiting for ${name(1 - me)}…`;
+      else if (theirs) note += ` · ${name(1 - me)}: ${isRight(s, q, theirs.a) ? '✅' : theirs.a === -1 ? '⏰' : '❌'}`;
+    } else if (!v.canPlay && !over) note = v.thinking ? '' : `Waiting for ${name(s.answers.length ? turnOf(n) : 0)}…`;
+    document.getElementById('note').textContent = note;
+
+    // countdown while it's my turn
+    const key = v.canPlay ? s.qs[q] + ':' + n : '';
+    if (key !== timerKey) { timerKey = key; timerStart = Date.now(); }
+    clearInterval(tick);
+    const bar = document.querySelector('#timer i'), secs = document.getElementById('secs');
+    if (v.canPlay) {
+      const upd = () => {
+        const left = Math.max(0, SECONDS - (Date.now() - timerStart) / 1000);
+        bar.style.width = (left / SECONDS * 100) + '%';
+        secs.textContent = Math.ceil(left) + 's';
+        if (left <= 0) { clearInterval(tick); api.play(-1); }
+      };
+      upd(); tick = setInterval(upd, 200);
+    } else { bar.style.width = '0%'; secs.textContent = ''; }
+  },
+});
+</script>
+</body>
+</html>

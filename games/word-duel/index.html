@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Word Duel</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #4dff88; --b: #ffd23f; --w: min(94vw, 420px); }
+  #rows { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .wrow { display: flex; gap: 5px; align-items: center; }
+  .wrow .who { width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; flex: none; }
+  .t { --t: min(11vw, 46px, calc((100vh - 400px) / 12)); width: var(--t); height: var(--t); border-radius: 8px; border: 2px solid #2a2650; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: calc(var(--t) * .55); text-transform: uppercase; box-sizing: border-box; }
+  .t.f { border-color: #5a5490; }
+  .t.g { background: #2fbf63; border-color: #2fbf63; }
+  .t.y { background: #d4a514; border-color: #d4a514; }
+  .t.x { background: #2a2650; border-color: #2a2650; }
+  .t.pop { animation: pop .25s; }
+  @keyframes pop { 50% { transform: scale(1.12); } }
+  .wrow.shake { animation: shake .35s; }
+  @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+  #kb { width: min(98vw, 500px); margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .kr { display: flex; gap: 5px; justify-content: center; }
+  .k { flex: 1; max-width: 44px; height: 50px; border-radius: 8px; border: 0; background: #3a3470; font-weight: 800; font-size: 15px; text-transform: uppercase; padding: 0; }
+  .k.wide { max-width: 68px; flex: 1.6; font-size: 12px; }
+  .k.g { background: #2fbf63; } .k.y { background: #d4a514; } .k.x { background: #1a1736; color: #6d6990; }
+  #kb.off { opacity: .4; pointer-events: none; }
+  #toast { position: fixed; top: 22%; left: 50%; transform: translateX(-50%); background: #fff; color: #0b0b1a; font-weight: 800; padding: 10px 18px;
+    border-radius: 12px; z-index: 20; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<script src="words.js"></script>
+<script src="../shared/turn.js"></script>
+<script>
+const LEN = 5, PER_SIDE = 6;
+const COLORS = ['#4dff88', '#ffd23f'];
+
+// g = right letter right spot, y = in the word elsewhere, x = not in the word
+function feedback(guess, secret) {
+  const out = Array(LEN).fill('x'), left = {};
+  for (let i = 0; i < LEN; i++) {
+    if (guess[i] === secret[i]) out[i] = 'g';
+    else left[secret[i]] = (left[secret[i]] || 0) + 1;
+  }
+  for (let i = 0; i < LEN; i++) {
+    if (out[i] !== 'g' && left[guess[i]]) { out[i] = 'y'; left[guess[i]]--; }
+  }
+  return out.join('');
+}
+
+let api, typed = '', lastState = null, lastView = null, drawnCount = -1;
+function toast(t) {
+  const el = document.getElementById('toast');
+  el.textContent = t; el.classList.add('on');
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 1400);
+}
+
+GZ.turnGame({
+  id: 'wordduel',
+  title: 'Word Duel',
+  sides: [{ name: 'Green', color: COLORS[0] }, { name: 'Gold', color: COLORS[1] }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>There's one secret 5-letter word. You and your friend <b>take turns</b> guessing it on the same board.</li>
+    <li><span style="color:#2fbf63">■</span> green = right letter, right spot. <span style="color:#d4a514">■</span> gold = in the word, wrong spot. Grey = not in the word.</li>
+    <li>You can see each other's clues — use them!</li><li>First to guess the word wins. ${PER_SIDE} guesses each.</li></ul>`,
+
+  init: seed => ({ secret: ANSWERS[Math.floor(GZ.rng(seed + ':word')() * ANSWERS.length)], guesses: [] }),
+  turn: s => s.guesses.length % 2,
+  apply(s, w, side) {
+    if (this.result(s) || typeof w !== 'string' || w.length !== LEN || !VALID.has(w)) return null;
+    return { secret: s.secret, guesses: s.guesses.concat({ w, side, fb: feedback(w, s.secret) }) };
+  },
+  result(s) {
+    const win = s.guesses.find(g => g.w === s.secret);
+    if (win) return { winner: win.side, reason: `the word was ${s.secret.toUpperCase()}` };
+    if (s.guesses.length >= PER_SIDE * 2) return { winner: null, reason: `nobody got it — the word was ${s.secret.toUpperCase()}` };
+    return null;
+  },
+  score: s => [0, 1].map(i => `${s.guesses.filter(g => g.side === i).length}/${PER_SIDE}`),
+
+  ai(s, side, level) {
+    // Keep only answers that fit every clue so far
+    const fits = ANSWERS.filter(w => s.guesses.every(g => feedback(g.w, w) === g.fb && g.w !== w));
+    const smart = [0.3, 0.65, 1][level];
+    if (fits.length && Math.random() < smart) return fits[Math.floor(Math.random() * fits.length)];
+    const used = new Set(s.guesses.map(g => g.w));
+    const pool = ANSWERS.filter(w => !used.has(w));
+    return pool[Math.floor(Math.random() * pool.length)];
+  },
+
+  mount(stage, a) {
+    api = a;
+    stage.innerHTML = '<div id="rows"></div><div id="kb"></div>';
+    const kb = stage.querySelector('#kb');
+    ['qwertyuiop', 'asdfghjkl', '+zxcvbnm-'].forEach(row => {
+      const r = document.createElement('div');
+      r.className = 'kr';
+      for (const ch of row) {
+        const b = document.createElement('button');
+        b.className = 'k' + ('+-'.includes(ch) ? ' wide' : '');
+        b.textContent = ch === '+' ? 'Enter' : ch === '-' ? '⌫' : ch;
+        b.dataset.k = ch;
+        b.onclick = () => key(ch);
+        r.appendChild(b);
+      }
+      kb.appendChild(r);
+    });
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey || e.metaKey) return;
+      if (e.key === 'Enter') key('+');
+      else if (e.key === 'Backspace') key('-');
+      else if (/^[a-z]$/i.test(e.key)) key(e.key.toLowerCase());
+    });
+  },
+  draw(s, v) {
+    lastState = s; lastView = v;
+    if (!v.canPlay) typed = '';
+    const rowsEl = document.getElementById('rows');
+    const fresh = s.guesses.length !== drawnCount; // only animate a guess the first time it appears
+    drawnCount = s.guesses.length;
+    let html = '';
+    s.guesses.forEach((g, n) => {
+      html += `<div class="wrow"><span class="who" style="background:${COLORS[g.side]}"></span>` +
+        [...g.w].map((ch, i) => `<div class="t ${g.fb[i]}${fresh && n === s.guesses.length - 1 ? ' pop' : ''}">${ch}</div>`).join('') + '</div>';
+    });
+    const over = !!this.result(s);
+    const total = PER_SIDE * 2;
+    for (let n = s.guesses.length; n < total; n++) {
+      const cur = n === s.guesses.length && !over;
+      const side = n % 2;
+      const letters = cur && v.canPlay ? typed : '';
+      html += `<div class="wrow${cur ? ' cur' : ''}"><span class="who" style="background:${COLORS[side]};opacity:${cur ? 1 : .25}"></span>` +
+        Array.from({ length: LEN }, (_, i) => `<div class="t${letters[i] ? ' f' : ''}" style="${cur ? '' : 'opacity:.35'}">${letters[i] || ''}</div>`).join('') + '</div>';
+    }
+    rowsEl.innerHTML = html;
+    // keyboard colors from every clue so far
+    const best = {};
+    const rank = { x: 1, y: 2, g: 3 };
+    for (const g of s.guesses) [...g.w].forEach((ch, i) => { if (!best[ch] || rank[g.fb[i]] > rank[best[ch]]) best[ch] = g.fb[i]; });
+    document.querySelectorAll('.k').forEach(b => { b.className = 'k' + ('+-'.includes(b.dataset.k) ? ' wide' : '') + (best[b.dataset.k] ? ' ' + best[b.dataset.k] : ''); });
+    document.getElementById('kb').classList.toggle('off', !v.canPlay);
+  },
+});
+
+function key(ch) {
+  if (!lastView || !lastView.canPlay) return;
+  if (ch === '-') typed = typed.slice(0, -1);
+  else if (ch === '+') {
+    if (typed.length < LEN) { toast('Not enough letters'); shake(); return; }
+    if (!VALID.has(typed)) { toast('Not in word list'); shake(); return; }
+    if (lastState.guesses.some(g => g.w === typed)) { toast('Already guessed'); shake(); return; }
+    const w = typed;
+    typed = '';
+    if (!api.play(w)) typed = w;
+    return;
+  } else if (typed.length < LEN) typed += ch;
+  api.redraw();
+}
+function shake() {
+  const row = document.querySelector('.wrow.cur');
+  if (row) { row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake'); }
+}
+</script>
+</body>
+</html>

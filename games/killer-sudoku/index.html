@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Killer Sudoku</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ff4d6d; --b: #ffb020; --bw: min(94vw, 56vh, 480px); --w: var(--bw); }
+  #info { width: var(--bw); display: flex; justify-content: space-between; font-size: 14px; opacity: .7; margin: 4px 0 8px; font-weight: 600; }
+  #grid { width: var(--bw); aspect-ratio: 1; display: grid; grid-template-columns: repeat(9, 1fr); grid-template-rows: repeat(9, 1fr); background: #6a58d8;
+    border: 2px solid #b8acff; border-radius: 8px; overflow: hidden; gap: 1px; box-sizing: border-box; }
+  .c { background: #13112e; position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0;
+    font-size: calc(var(--bw) / 9 * .5); font-weight: 600; color: #ffc46b; }
+  .c.br { margin-right: 1px; } .c.bb { margin-bottom: 1px; }
+  .c.given { color: #fff; font-weight: 800; }
+  .c.zone { background: #1d1a45; } .c.same { background: #3b2f6e; } .c.sel { background: #6a3fb5; }
+  .c.bad { color: #ff5577; }
+  .cage { position: absolute; inset: 2px; border: 1.5px dashed transparent; pointer-events: none; }
+  .cage.t { border-top-color: rgba(255, 255, 255, .55); } .cage.b { border-bottom-color: rgba(255, 255, 255, .55); }
+  .cage.l { border-left-color: rgba(255, 255, 255, .55); } .cage.r { border-right-color: rgba(255, 255, 255, .55); }
+  .cage.t { top: 2px; } .cage:not(.t) { top: -1px; } .cage:not(.b) { bottom: -1px; } .cage:not(.l) { left: -1px; } .cage:not(.r) { right: -1px; }
+  .sum { position: absolute; top: 1px; left: 3px; font-size: calc(var(--bw) / 9 * .2); font-weight: 800; color: #fff; background: #13112e; padding: 0 1px; line-height: 1.1; z-index: 1; }
+  .c.zone .sum { background: #1d1a45; } .c.same .sum { background: #3b2f6e; } .c.sel .sum { background: #6a3fb5; }
+  .notes { position: absolute; inset: 22% 4% 2% 4%; display: grid; grid-template-columns: repeat(3, 1fr); font-size: calc(var(--bw) / 9 * .2); color: #a8a2d8; font-weight: 600; }
+  .notes span { display: flex; align-items: center; justify-content: center; }
+  #tools { width: var(--bw); display: flex; justify-content: space-around; margin: 12px 0 8px; }
+  .tool { background: none; border: 0; color: #fff; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; opacity: .85; }
+  .tool span { font-size: 22px; } .tool.on { color: #ffb020; opacity: 1; }
+  #pad { width: var(--bw); display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
+  #pad button { font-size: calc(var(--bw) / 9 * .5); font-weight: 600; padding: 8px 0; border: 0; border-radius: 10px; background: #1c1640; color: #ffc46b; }
+  #pad button.done { opacity: .25; }
+  .card .btn small { display: block; font-weight: 500; font-size: 12px; opacity: .7; }
+</style>
+</head>
+<body>
+<div id="top"><a href="../../">&#8249;</a><h1>KILLER SUDOKU</h1><button class="round" id="helpBtn">?</button></div>
+<div id="info"><span id="diffLabel"></span><span id="mistakes"></span><span id="timer">0:00</span></div>
+<div id="grid"></div>
+<div id="tools">
+  <button class="tool" id="undoBtn"><span>↶</span>Undo</button>
+  <button class="tool" id="eraseBtn"><span>⌫</span>Erase</button>
+  <button class="tool" id="notesBtn"><span>✎</span>Notes</button>
+  <button class="tool" id="hintBtn"><span>💡</span>Hint</button>
+  <button class="tool" id="newBtn"><span>＋</span>New</button>
+</div>
+<div id="pad"></div>
+
+<div id="newMenu" class="overlay hidden"><div class="card">
+  <h2>New puzzle</h2>
+  <button class="btn" data-diff="easy">Easy<small id="best-easy"></small></button>
+  <button class="btn" data-diff="medium">Medium<small id="best-medium"></small></button>
+  <button class="btn" data-diff="hard">Hard<small id="best-hard"></small></button>
+  <button class="btn" id="cancelNew">Cancel</button>
+</div></div>
+<div id="win" class="overlay hidden"><div class="card"><h2>Solved! 🎉</h2><p id="winText"></p><button class="btn main" id="winNew">New puzzle</button></div></div>
+<div id="helpBox" class="overlay hidden"><div class="card help">
+  <h2>How to play</h2>
+  <ul><li>Like Sudoku: each row, column and 3×3 box has 1–9 once.</li>
+  <li>The dashed shapes are <b>cages</b>. The small number is what the cage's digits <b>add up to</b>.</li>
+  <li>A number can't repeat inside a cage.</li>
+  <li>Tip: every row, column and box adds up to 45.</li></ul>
+  <button class="btn main" id="helpClose">Got it</button>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const EXTRA = { easy: 14, medium: 5, hard: 0 }; // free numbers given on top of what's needed
+const DIFF_NAME = { easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+
+// ---------- puzzle generator ----------
+const peers = [];
+for (let i = 0; i < 81; i++) {
+  const r = Math.floor(i / 9), c = i % 9, set = new Set();
+  for (let k = 0; k < 9; k++) { set.add(r * 9 + k); set.add(k * 9 + c); }
+  const br = r - r % 3, bc = c - c % 3;
+  for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) set.add((br + a) * 9 + bc + b);
+  set.delete(i);
+  peers.push([...set]);
+}
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function fullGrid() {
+  const g = Array(81).fill(0);
+  (function fill(i) {
+    if (i === 81) return true;
+    const used = new Set(peers[i].map(p => g[p]));
+    for (const v of shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9])) { if (used.has(v)) continue; g[i] = v; if (fill(i + 1)) return true; }
+    g[i] = 0;
+    return false;
+  })(0);
+  return g;
+}
+
+function makeCages(sol) {
+  const cageOf = Array(81).fill(-1), cages = [];
+  for (const start of shuffle([...Array(81).keys()])) {
+    if (cageOf[start] >= 0) continue;
+    const roll = Math.random();
+    const size = roll < 0.04 ? 1 : roll < 0.32 ? 2 : roll < 0.68 ? 3 : roll < 0.92 ? 4 : 5;
+    const cells = [start];
+    cageOf[start] = cages.length;
+    while (cells.length < size) {
+      const opts = [];
+      for (const c of cells) {
+        const r = Math.floor(c / 9), k = c % 9;
+        for (const [dr, dk] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+          const rr = r + dr, kk = k + dk, n = rr * 9 + kk;
+          if (rr >= 0 && rr < 9 && kk >= 0 && kk < 9 && cageOf[n] < 0 && !cells.some(x => sol[x] === sol[n])) opts.push(n);
+        }
+      }
+      if (!opts.length) break;
+      const n = opts[Math.floor(Math.random() * opts.length)];
+      cells.push(n); cageOf[n] = cages.length;
+    }
+    cages.push({ cells, sum: cells.reduce((t, c) => t + sol[c], 0) });
+  }
+  return { cages, cageOf };
+}
+
+// Finds up to `limit` solutions using the row/column/box rules plus the cage sums
+function solutions(givens, cages, cageOf, limit) {
+  const g = givens.slice(), found = [];
+  const rowM = Array(9).fill(0), colM = Array(9).fill(0), boxM = Array(9).fill(0), cageM = cages.map(() => 0);
+  const cageSum = cages.map(() => 0), cageLeft = cages.map(cg => cg.cells.length);
+  const box = i => Math.floor(Math.floor(i / 9) / 3) * 3 + Math.floor(i % 9 / 3);
+  const set = (i, v, on) => {
+    const bit = 1 << v, k = cageOf[i];
+    rowM[Math.floor(i / 9)] ^= bit; colM[i % 9] ^= bit; boxM[box(i)] ^= bit; cageM[k] ^= bit;
+    cageSum[k] += on ? v : -v; cageLeft[k] += on ? -1 : 1;
+  };
+  for (let i = 0; i < 81; i++) if (g[i]) set(i, g[i], true);
+  const fits = (i, v) => {
+    const k = cageOf[i], rest = cages[k].sum - cageSum[k] - v, left = cageLeft[k] - 1;
+    if (left === 0) return rest === 0;
+    if (rest <= 0) return false;
+    let lo = 0, hi = 0, n = 0;
+    for (let d = 1; d <= 9 && n < left; d++) if (d !== v && !(cageM[k] >> d & 1)) { lo += d; n++; }
+    n = 0;
+    for (let d = 9; d >= 1 && n < left; d--) if (d !== v && !(cageM[k] >> d & 1)) { hi += d; n++; }
+    return rest >= lo && rest <= hi;
+  };
+  (function go() {
+    if (found.length >= limit) return;
+    let best = -1, bestC = null;
+    for (let i = 0; i < 81; i++) {
+      if (g[i]) continue;
+      const used = rowM[Math.floor(i / 9)] | colM[i % 9] | boxM[box(i)] | cageM[cageOf[i]];
+      const c = [];
+      for (let v = 1; v <= 9; v++) if (!(used >> v & 1) && fits(i, v)) c.push(v);
+      if (!c.length) return;
+      if (!bestC || c.length < bestC.length) { best = i; bestC = c; if (c.length === 1) break; }
+    }
+    if (best < 0) { found.push(g.slice()); return; }
+    for (const v of bestC) {
+      g[best] = v; set(best, v, true);
+      go();
+      set(best, v, false); g[best] = 0;
+      if (found.length >= limit) return;
+    }
+  })();
+  return found;
+}
+
+function makePuzzle(diff) {
+  for (;;) {
+    const solution = fullGrid();
+    const { cages, cageOf } = makeCages(solution);
+    const puzzle = Array(81).fill(0);
+    // Add given numbers until only one answer is possible
+    let tries = 0, ok = false;
+    while (tries++ < 30) {
+      const s = solutions(puzzle, cages, cageOf, 2);
+      if (s.length === 1) { ok = true; break; }
+      const diffs = [...Array(81).keys()].filter(i => !puzzle[i] && s[0][i] !== s[1][i]);
+      const i = diffs[Math.floor(Math.random() * diffs.length)];
+      puzzle[i] = solution[i];
+    }
+    if (!ok) continue;
+    const empty = shuffle([...Array(81).keys()].filter(i => !puzzle[i]));
+    for (let k = 0; k < EXTRA[diff] && k < empty.length; k++) puzzle[empty[k]] = solution[empty[k]];
+    return { puzzle, solution, cages, cageOf };
+  }
+}
+
+// ---------- game ----------
+let S, sel = -1, notesMode = false, undoStack = [];
+
+function newGame(diff) {
+  const p = makePuzzle(diff);
+  S = Object.assign(p, { diff, cells: p.puzzle.slice(), notes: Array.from({ length: 81 }, () => []), mistakes: 0, time: 0, hints: 0, done: false });
+  sel = -1; undoStack = [];
+  buildCages(); save(); render();
+}
+function save() { localStorage.setItem('killerSave', JSON.stringify(S)); }
+function snapshot() { undoStack.push(JSON.stringify({ cells: S.cells, notes: S.notes })); if (undoStack.length > 200) undoStack.shift(); }
+
+function enter(n) {
+  if (sel < 0 || S.done || S.puzzle[sel]) return;
+  snapshot();
+  if (notesMode) {
+    if (S.cells[sel]) return;
+    const nt = S.notes[sel];
+    S.notes[sel] = nt.includes(n) ? nt.filter(x => x !== n) : [...nt, n].sort();
+  } else if (S.cells[sel] === n) S.cells[sel] = 0;
+  else {
+    S.cells[sel] = n; S.notes[sel] = [];
+    if (n !== S.solution[sel]) { S.mistakes++; if (navigator.vibrate) navigator.vibrate(60); }
+    else for (const p of peers[sel].concat(S.cages[S.cageOf[sel]].cells)) S.notes[p] = S.notes[p].filter(x => x !== n);
+  }
+  checkWin(); save(); render();
+}
+function erase() { if (sel < 0 || S.puzzle[sel] || S.done) return; snapshot(); S.cells[sel] = 0; S.notes[sel] = []; save(); render(); }
+function undo() { if (!undoStack.length || S.done) return; const u = JSON.parse(undoStack.pop()); S.cells = u.cells; S.notes = u.notes; save(); render(); }
+function hint() {
+  if (S.done) return;
+  let i = sel >= 0 && S.cells[sel] !== S.solution[sel] ? sel : -1;
+  if (i < 0) { const open = [...Array(81).keys()].filter(k => S.cells[k] !== S.solution[k]); if (!open.length) return; i = open[Math.floor(Math.random() * open.length)]; }
+  snapshot(); S.cells[i] = S.solution[i]; S.notes[i] = []; S.hints++; sel = i;
+  checkWin(); save(); render();
+}
+function checkWin() {
+  if (!S.cells.every((v, i) => v === S.solution[i])) return;
+  S.done = true;
+  const key = 'killerBest_' + S.diff, prev = +localStorage.getItem(key) || 0, isBest = !S.hints && (!prev || S.time < prev);
+  if (isBest) localStorage.setItem(key, S.time);
+  $('winText').textContent = `${DIFF_NAME[S.diff]} in ${fmt(S.time)} · ${S.mistakes} mistake${S.mistakes === 1 ? '' : 's'}` + (S.hints ? ` · ${S.hints} hints` : '') + (isBest ? ' · NEW BEST!' : '');
+  setTimeout(() => $('win').classList.remove('hidden'), 400);
+}
+
+const gridEl = $('grid'), cellEls = [];
+for (let i = 0; i < 81; i++) {
+  const el = document.createElement('div');
+  el.onclick = () => { sel = i; render(); };
+  gridEl.appendChild(el); cellEls.push(el);
+}
+for (let n = 1; n <= 9; n++) {
+  const b = document.createElement('button');
+  b.textContent = n; b.onclick = () => enter(n);
+  $('pad').appendChild(b);
+}
+let cageHtml = [];
+function buildCages() {
+  cageHtml = [];
+  for (let i = 0; i < 81; i++) {
+    const k = S.cageOf[i], r = Math.floor(i / 9), c = i % 9;
+    const same = (rr, cc) => rr >= 0 && rr < 9 && cc >= 0 && cc < 9 && S.cageOf[rr * 9 + cc] === k;
+    const cls = 'cage' + (same(r - 1, c) ? '' : ' t') + (same(r + 1, c) ? '' : ' b') + (same(r, c - 1) ? '' : ' l') + (same(r, c + 1) ? '' : ' r');
+    const first = Math.min(...S.cages[k].cells) === i;
+    cageHtml.push(`<div class="${cls}"></div>` + (first ? `<span class="sum">${S.cages[k].sum}</span>` : ''));
+  }
+}
+function render() {
+  const sr = Math.floor(sel / 9), sc = sel % 9, sv = sel >= 0 ? S.cells[sel] : 0;
+  cellEls.forEach((el, i) => {
+    const r = Math.floor(i / 9), c = i % 9, v = S.cells[i];
+    let cls = 'c';
+    if (c === 2 || c === 5) cls += ' br';
+    if (r === 2 || r === 5) cls += ' bb';
+    if (S.puzzle[i]) cls += ' given';
+    if (sel >= 0 && (r === sr || c === sc || (Math.floor(r / 3) === Math.floor(sr / 3) && Math.floor(c / 3) === Math.floor(sc / 3)) || S.cageOf[i] === S.cageOf[sel])) cls += ' zone';
+    if (sv && v === sv) cls += ' same';
+    if (i === sel) cls += ' sel';
+    if (v && v !== S.solution[i]) cls += ' bad';
+    el.className = cls;
+    el.innerHTML = cageHtml[i] + (v ? v : S.notes[i].length ? '<div class="notes">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<span>${S.notes[i].includes(n) ? n : ''}</span>`).join('') + '</div>' : '');
+  });
+  [...$('pad').children].forEach((b, k) => b.classList.toggle('done', S.cells.filter((v, i) => v === k + 1 && v === S.solution[i]).length === 9));
+  $('notesBtn').classList.toggle('on', notesMode);
+  $('diffLabel').textContent = DIFF_NAME[S.diff];
+  $('mistakes').textContent = 'Mistakes: ' + S.mistakes;
+  $('timer').textContent = fmt(S.time);
+}
+const fmt = t => Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+setInterval(() => {
+  if (!S || S.done || document.hidden || !$('newMenu').classList.contains('hidden')) return;
+  S.time++; $('timer').textContent = fmt(S.time);
+  if (S.time % 5 === 0) save();
+}, 1000);
+
+$('undoBtn').onclick = undo;
+$('eraseBtn').onclick = erase;
+$('notesBtn').onclick = () => { notesMode = !notesMode; render(); };
+$('hintBtn').onclick = hint;
+function openNew() {
+  for (const d in EXTRA) { const b = +localStorage.getItem('killerBest_' + d); $('best-' + d).textContent = b ? 'Best: ' + fmt(b) : ''; }
+  $('cancelNew').classList.toggle('hidden', !S || S.done);
+  $('newMenu').classList.remove('hidden');
+}
+$('newBtn').onclick = openNew;
+$('cancelNew').onclick = () => $('newMenu').classList.add('hidden');
+document.querySelectorAll('[data-diff]').forEach(b => b.onclick = () => {
+  const label = b.innerHTML;
+  b.innerHTML = 'Making puzzle…';
+  setTimeout(() => { newGame(b.dataset.diff); b.innerHTML = label; $('newMenu').classList.add('hidden'); }, 30);
+});
+$('winNew').onclick = () => { $('win').classList.add('hidden'); openNew(); };
+$('helpBtn').onclick = () => $('helpBox').classList.remove('hidden');
+$('helpClose').onclick = () => { $('helpBox').classList.add('hidden'); localStorage.setItem('killerHelp', 1); };
+document.addEventListener('keydown', e => {
+  if (e.key >= '1' && e.key <= '9') enter(+e.key);
+  else if (e.key === 'Backspace' || e.key === 'Delete') erase();
+});
+
+try { S = JSON.parse(localStorage.getItem('killerSave')); } catch (e) {}
+if (S && S.cages && !S.done) { buildCages(); render(); }
+else { S = null; newGame('easy'); openNew(); }
+if (!localStorage.getItem('killerHelp')) $('helpBox').classList.remove('hidden');
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

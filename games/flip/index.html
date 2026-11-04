@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Flip</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #9d6bff; --b: #4dff88; --w: min(94vw, 62vh, 480px); }
+  #board { width: var(--w); aspect-ratio: 1; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); gap: 2px;
+    background: #0c3b2e; padding: 4px; box-sizing: border-box; border-radius: 14px; box-shadow: 0 0 30px rgba(77, 255, 136, .2); }
+  .sq { background: #147a52; border-radius: 4px; display: flex; align-items: center; justify-content: center; position: relative; min-width: 0; min-height: 0; }
+  .dsc { width: 82%; height: 82%; border-radius: 50%; transition: background .3s, transform .3s; }
+  .dsc.s0 { background: radial-gradient(circle at 35% 30%, #5a5a6e, #111118); box-shadow: 0 2px 4px rgba(0, 0, 0, .5); }
+  .dsc.s1 { background: radial-gradient(circle at 35% 30%, #fff, #cfd2dc); box-shadow: 0 2px 4px rgba(0, 0, 0, .4); }
+  .dsc.flipped { animation: flip .35s; }
+  @keyframes flip { 50% { transform: scaleX(0); } }
+  .sq.hint::after { content: ''; width: 26%; height: 26%; border-radius: 50%; background: rgba(255, 255, 255, .28); }
+  .sq.last::before { content: ''; position: absolute; width: 14%; height: 14%; border-radius: 50%; background: #ff4d6d; z-index: 2; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const D8 = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+
+function flips(b, i, side) {
+  if (b[i] >= 0) return [];
+  const r = i >> 3, c = i & 7, out = [];
+  for (const [dr, dc] of D8) {
+    const run = [];
+    let rr = r + dr, cc = c + dc;
+    while (rr >= 0 && rr < 8 && cc >= 0 && cc < 8 && b[rr * 8 + cc] === 1 - side) { run.push(rr * 8 + cc); rr += dr; cc += dc; }
+    if (run.length && rr >= 0 && rr < 8 && cc >= 0 && cc < 8 && b[rr * 8 + cc] === side) out.push(...run);
+  }
+  return out;
+}
+const movesFor = (b, side) => [...Array(64).keys()].filter(i => flips(b, i, side).length);
+
+function place(b, i, side) {
+  const nb = b.slice();
+  for (const f of flips(b, i, side)) nb[f] = side;
+  nb[i] = side;
+  return nb;
+}
+
+// ---------- computer ----------
+// Corners are gold, squares next to empty corners are dangerous
+const W = [
+  100, -20, 10, 5, 5, 10, -20, 100,
+  -20, -40, -2, -2, -2, -2, -40, -20,
+  10, -2, 1, 1, 1, 1, -2, 10,
+  5, -2, 1, 0, 0, 1, -2, 5,
+  5, -2, 1, 0, 0, 1, -2, 5,
+  10, -2, 1, 1, 1, 1, -2, 10,
+  -20, -40, -2, -2, -2, -2, -40, -20,
+  100, -20, 10, 5, 5, 10, -20, 100];
+function evaluate(b, side) {
+  let v = 0, empty = 0;
+  for (let i = 0; i < 64; i++) { if (b[i] === side) v += W[i]; else if (b[i] === 1 - side) v -= W[i]; else empty++; }
+  v += 5 * (movesFor(b, side).length - movesFor(b, 1 - side).length);
+  if (empty < 10) for (let i = 0; i < 64; i++) v += b[i] === side ? 8 : b[i] === 1 - side ? -8 : 0;
+  return v;
+}
+function search(b, side, depth, alpha, beta, passed) {
+  const ms = movesFor(b, side);
+  if (!ms.length) {
+    if (passed) { const d = b.filter(x => x === side).length - b.filter(x => x === 1 - side).length; return d * 1000; }
+    return -search(b, 1 - side, depth, -beta, -alpha, true);
+  }
+  if (depth === 0) return evaluate(b, side);
+  let best = -Infinity;
+  for (const m of ms.sort((x, y) => W[y] - W[x])) {
+    const v = -search(place(b, m, side), 1 - side, depth - 1, -beta, -alpha, false);
+    if (v > best) best = v;
+    if (v > alpha) alpha = v;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+// ---------- UI ----------
+let api, sqs = [], prevBoard = null;
+
+GZ.turnGame({
+  id: 'flip',
+  title: 'Flip',
+  sides: [{ name: 'Black', color: '#6b6b80' }, { name: 'White', color: '#f2f2f2' }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>Place a disc so it <b>traps</b> a line of your friend's discs between two of yours.</li>
+    <li>All trapped discs <b>flip</b> to your color. Lines can go across, up-down or diagonal.</li>
+    <li>Dots show where you can play. If you can't move, your turn is skipped.</li>
+    <li>When nobody can move, the most discs wins. Corners are powerful!</li></ul>`,
+
+  init() {
+    const b = new Array(64).fill(-1);
+    b[27] = 1; b[36] = 1; b[28] = 0; b[35] = 0;
+    return { b, cur: 0, last: -1, skipped: false, over: false };
+  },
+  turn: s => s.cur,
+  apply(s, i, side) {
+    if (s.over || !Number.isInteger(i) || i < 0 || i >= 64 || !flips(s.b, i, side).length) return null;
+    const b = place(s.b, i, side);
+    const otherCan = movesFor(b, 1 - side).length > 0;
+    const meCan = movesFor(b, side).length > 0;
+    return { b, last: i, cur: otherCan ? 1 - side : side, skipped: !otherCan && meCan, over: !otherCan && !meCan };
+  },
+  result(s) {
+    if (!s.over) return null;
+    const [a, b] = this.score(s);
+    return { winner: a === b ? null : a > b ? 0 : 1, reason: `${Math.max(a, b)} discs to ${Math.min(a, b)}` };
+  },
+  score: s => [0, 1].map(i => s.b.filter(x => x === i).length),
+  status(s, v) {
+    if (s.over || !s.skipped) return null;
+    const who = v.mode === 'local' ? this.sides[1 - s.cur].name : v.me === s.cur ? 'Your friend' : 'You';
+    return `${who} had no moves — ${v.mode === 'local' ? this.sides[s.cur].name + ' goes again' : v.me === s.cur ? 'your turn again' : 'their turn again'}`;
+  },
+  ai(s, side, level) {
+    const ms = movesFor(s.b, side);
+    if (level === 0) { // greedy: flip the most, with a little randomness
+      return ms.map(m => [m, flips(s.b, m, side).length + Math.random() * 3]).sort((a, b) => b[1] - a[1])[0][0];
+    }
+    const depth = level === 1 ? 2 : 4;
+    let best = ms[0], bestV = -Infinity;
+    for (const m of ms) {
+      const v = -search(place(s.b, m, side), 1 - side, depth - 1, -Infinity, Infinity, false) + Math.random() * 2;
+      if (v > bestV) { bestV = v; best = m; }
+    }
+    return best;
+  },
+
+  mount(stage, a) {
+    api = a;
+    const board = document.createElement('div');
+    board.id = 'board';
+    for (let i = 0; i < 64; i++) {
+      const el = document.createElement('div');
+      el.className = 'sq';
+      el.onclick = () => api.play(i);
+      board.appendChild(el);
+      sqs.push(el);
+    }
+    stage.appendChild(board);
+  },
+  draw(s, v) {
+    const hints = v.canPlay ? new Set(movesFor(s.b, s.cur)) : new Set();
+    sqs.forEach((el, i) => {
+      el.className = 'sq' + (hints.has(i) ? ' hint' : '') + (i === s.last ? ' last' : '');
+      const p = s.b[i];
+      if (p < 0) { el.innerHTML = ''; return; }
+      const changed = prevBoard && prevBoard[i] >= 0 && prevBoard[i] !== p;
+      el.innerHTML = `<div class="dsc s${p}${changed ? ' flipped' : ''}"></div>`;
+    });
+    prevBoard = s.b.slice();
+  },
+});
+</script>
+</body>
+</html>

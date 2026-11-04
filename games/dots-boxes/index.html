@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Dots &amp; Boxes</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ff7ad9; --b: #33ccff; }
+  svg { width: var(--w); aspect-ratio: 1; display: block; background: #13112e; border-radius: 18px; }
+  .ln { stroke: rgba(255, 255, 255, .08); stroke-width: 7; stroke-linecap: round; }
+  .ln.s0 { stroke: #ff7ad9; } .ln.s1 { stroke: #33ccff; }
+  .ln.last { filter: drop-shadow(0 0 5px #fff); }
+  .hit { stroke: transparent; stroke-width: 34; cursor: pointer; }
+  .on .hit:active + .ln:not(.s0):not(.s1), .on .hit:hover + .ln:not(.s0):not(.s1) { stroke: rgba(255, 255, 255, .35); }
+  .box { opacity: 0; transition: opacity .25s; }
+  .box.s0 { fill: #ff7ad9; opacity: .32; } .box.s1 { fill: #33ccff; opacity: .32; }
+  .dot { fill: #fff; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const B = 5;                        // 5 × 5 boxes
+const NH = (B + 1) * B;             // horizontal lines come first, then vertical
+const NL = NH + B * (B + 1);
+const H = (r, c) => r * B + c;               // line above box row r
+const V = (r, c) => NH + r * (B + 1) + c;    // line left of box column c
+const boxLines = [];
+for (let r = 0; r < B; r++) for (let c = 0; c < B; c++) boxLines.push([H(r, c), H(r + 1, c), V(r, c), V(r, c + 1)]);
+const lineBoxes = Array.from({ length: NL }, () => []);
+boxLines.forEach((ls, b) => ls.forEach(l => lineBoxes[l].push(b)));
+
+const sidesDrawn = (lines, b) => boxLines[b].filter(l => lines[l] >= 0).length;
+
+function applyLine(s, l, side) {
+  const lines = s.lines.slice(), boxes = s.boxes.slice();
+  lines[l] = side;
+  let made = 0;
+  for (const b of lineBoxes[l]) if (boxes[b] < 0 && sidesDrawn(lines, b) === 4) { boxes[b] = side; made++; }
+  return { lines, boxes, cur: made ? side : 1 - side, last: l };
+}
+
+// ---------- computer ----------
+// How many boxes would the opponent grab in a row after this line is drawn?
+function giveaway(s, l, side) {
+  let st = applyLine(s, l, side), n = 0;
+  for (;;) {
+    const take = st.boxes.findIndex((o, b) => o < 0 && sidesDrawn(st.lines, b) === 3);
+    if (take < 0) return n;
+    const line = boxLines[take].find(x => st.lines[x] < 0);
+    st = applyLine(st, line, 1 - side);
+    n++;
+  }
+}
+function aiMove(s, side, level) {
+  const free = [...Array(NL).keys()].filter(l => s.lines[l] < 0);
+  const rand = a => a[Math.floor(Math.random() * a.length)];
+  const completes = free.filter(l => lineBoxes[l].some(b => s.boxes[b] < 0 && sidesDrawn(s.lines, b) === 3));
+  if (completes.length && (level > 0 || Math.random() < 0.8)) return rand(completes);
+  if (level === 0) return rand(free);
+  const safe = free.filter(l => lineBoxes[l].every(b => sidesDrawn(s.lines, b) < 2));
+  if (safe.length) return rand(safe);
+  if (level === 1) return rand(free);
+  let best = [], bestN = Infinity; // give away as little as possible
+  for (const l of free) {
+    const n = giveaway(s, l, side);
+    if (n < bestN) { bestN = n; best = [l]; } else if (n === bestN) best.push(l);
+  }
+  return rand(best);
+}
+
+// ---------- drawing ----------
+const P = 10, STEP = 80 / B; // board drawn in a 100 × 100 box
+const pt = (r, c) => [P + c * STEP, P + r * STEP];
+function lineEnds(l) {
+  if (l < NH) { const r = Math.floor(l / B), c = l % B; return [pt(r, c), pt(r, c + 1)]; }
+  const k = l - NH, r = Math.floor(k / (B + 1)), c = k % (B + 1);
+  return [pt(r, c), pt(r + 1, c)];
+}
+let svg, lineEls = [], boxEls = [];
+
+GZ.turnGame({
+  id: 'dots',
+  title: 'Dots & Boxes',
+  sides: [{ name: 'Pink', color: '#ff7ad9' }, { name: 'Blue', color: '#33ccff' }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>Take turns drawing one line between two dots.</li><li>Draw the <b>4th side</b> of a box to claim it — then you <b>go again</b>.</li>
+    <li>Careful: drawing the 3rd side of a box lets your friend take it.</li><li>Most boxes at the end wins.</li></ul>`,
+
+  init: () => ({ lines: new Array(NL).fill(-1), boxes: new Array(B * B).fill(-1), cur: 0, last: -1 }),
+  turn: s => s.cur,
+  apply(s, l, side) {
+    if (!Number.isInteger(l) || l < 0 || l >= NL || s.lines[l] >= 0 || this.result(s)) return null;
+    return applyLine(s, l, side);
+  },
+  result(s) {
+    if (s.boxes.some(o => o < 0)) return null;
+    const [a, b] = this.score(s);
+    return { winner: a === b ? null : a > b ? 0 : 1, reason: `${Math.max(a, b)} boxes to ${Math.min(a, b)}` };
+  },
+  score: s => [0, 1].map(i => s.boxes.filter(o => o === i).length),
+  ai: (s, side, level) => aiMove(s, side, level),
+
+  mount(stage, api) {
+    const NS = 'http://www.w3.org/2000/svg';
+    svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    for (let b = 0; b < B * B; b++) {
+      const [x, y] = pt(Math.floor(b / B), b % B);
+      const r = document.createElementNS(NS, 'rect');
+      Object.entries({ x: x + 1, y: y + 1, width: STEP - 2, height: STEP - 2, rx: 2, class: 'box' }).forEach(([k, v]) => r.setAttribute(k, v));
+      svg.appendChild(r); boxEls.push(r);
+    }
+    for (let l = 0; l < NL; l++) {
+      const [[x1, y1], [x2, y2]] = lineEnds(l);
+      for (const cls of ['hit', 'ln']) {
+        const ln = document.createElementNS(NS, 'line');
+        Object.entries({ x1, y1, x2, y2, class: cls }).forEach(([k, v]) => ln.setAttribute(k, v));
+        ln.style.strokeWidth = cls === 'hit' ? 7 : 1.6;
+        if (cls === 'hit') ln.addEventListener('click', () => api.play(l));
+        svg.appendChild(ln);
+        if (cls === 'ln') lineEls.push(ln);
+      }
+    }
+    for (let r = 0; r <= B; r++) for (let c = 0; c <= B; c++) {
+      const [x, y] = pt(r, c), d = document.createElementNS(NS, 'circle');
+      Object.entries({ cx: x, cy: y, r: 1.6, class: 'dot' }).forEach(([k, v]) => d.setAttribute(k, v));
+      svg.appendChild(d);
+    }
+    stage.appendChild(svg);
+  },
+  draw(s, v) {
+    svg.classList.toggle('on', v.canPlay);
+    lineEls.forEach((ln, l) => ln.setAttribute('class', 'ln' + (s.lines[l] >= 0 ? ' s' + s.lines[l] : '') + (l === s.last ? ' last' : '')));
+    boxEls.forEach((r, b) => r.setAttribute('class', 'box' + (s.boxes[b] >= 0 ? ' s' + s.boxes[b] : '')));
+  },
+});
+</script>
+</body>
+</html>

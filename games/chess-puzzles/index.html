@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Chess Puzzles</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #a9f; --b: #4dff88; --bw: min(94vw, 60vh, 520px); --w: var(--bw); }
+  #tabs { width: var(--bw); display: flex; gap: 8px; margin-bottom: 10px; }
+  #prompt { width: var(--bw); display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-weight: 800; font-size: 18px; }
+  #prompt small { font-size: 13px; opacity: .6; font-weight: 700; }
+  #board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: var(--bw); aspect-ratio: 1; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 0 40px rgba(120, 90, 255, .35); }
+  #board.shake { animation: shake .4s; }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  .sq { position: relative; display: flex; align-items: center; justify-content: center; line-height: 1; min-width: 0; min-height: 0; overflow: hidden;
+    font-size: calc(var(--bw) / 8 * .8); font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "DejaVu Sans", sans-serif; }
+  .light { background-color: #d4ceff; } .dark { background-color: #6a58d8; }
+  .light.last { background-color: #f3e68f; } .dark.last { background-color: #c7b54b; }
+  .sq.sel { background-color: #5fe0a0 !important; }
+  .sq.hint { background-color: #4dd0ff !important; }
+  .sq.bad { background-color: #ff4d6d !important; }
+  .sq.check { background-image: radial-gradient(circle, rgba(255, 40, 80, 1) 20%, rgba(255, 40, 80, 0) 72%); }
+  .sq.dot::after { content: ''; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(15, 8, 50, .35); }
+  .sq.ring::after { content: ''; position: absolute; inset: 5%; border-radius: 50%; border: calc(var(--bw) / 90) solid rgba(15, 8, 50, .4); }
+  .pw { color: #fff; -webkit-text-stroke: 1.5px #1d1450; paint-order: stroke fill; text-shadow: 0 2px 3px rgba(0, 0, 0, .35); }
+  .pb { color: #170f3a; text-shadow: 0 1px 1px rgba(255, 255, 255, .25); }
+  .coord { position: absolute; font-size: 10px; font-weight: 800; font-family: system-ui, sans-serif; opacity: .75; }
+  .coord.f { right: 3px; bottom: 1px; } .coord.r { left: 3px; top: 2px; }
+  .light .coord { color: #6a58d8; } .dark .coord { color: #d4ceff; }
+  #msg { margin: 12px 0 4px; font-weight: 700; font-size: 17px; min-height: 24px; text-align: center; }
+  #controls { display: flex; gap: 8px; margin-top: 6px; }
+  #stats { margin-top: 12px; font-size: 13px; opacity: .6; }
+</style>
+</head>
+<body>
+<div id="top"><a href="../../">&#8249;</a><h1>CHESS PUZZLES</h1><button class="round" id="helpBtn">?</button></div>
+<div id="tabs" class="row"><button class="seg on" data-track="m1">Mate in 1</button><button class="seg" data-track="m2">Mate in 2</button></div>
+<div id="prompt"><span id="who"></span><small id="num"></small></div>
+<div id="board"></div>
+<div id="msg"></div>
+<div id="controls"><button class="btn" id="hintBtn">💡 Hint</button><button class="btn" id="retryBtn">↺ Retry</button><button class="btn main" id="nextBtn">Next ›</button></div>
+<div id="stats"></div>
+
+<div id="helpBox" class="overlay hidden"><div class="card help">
+  <h2>How to play</h2>
+  <ul><li>Find the move that <b>checkmates</b> — the king is attacked and can't escape.</li>
+  <li><b>Mate in 1:</b> one move wins.</li><li><b>Mate in 2:</b> make a move, the computer defends as best it can, then finish with checkmate.</li>
+  <li>Tap a piece, then tap where it should go. Every puzzle has exactly one winning first move.</li></ul>
+  <button class="btn main" id="helpClose">Got it</button>
+</div></div>
+
+<script src="../chess/engine.js"></script>
+<script src="puzzles.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const glyph = p => GLYPH[p.toLowerCase()] + '︎';
+
+function fromFen(fen) {
+  const [pos, turn, castle, ep] = fen.split(' ');
+  const b = [];
+  for (const ch of pos.replace(/\//g, '')) { if (/\d/.test(ch)) for (let i = 0; i < +ch; i++) b.push(null); else b.push(ch); }
+  return { b, turn, castle: castle === '-' ? '' : castle, ep: ep === '-' ? -1 : sqIndex(ep), half: 0 };
+}
+const isMate = s => inCheck(s) && legalMoves(s).length === 0;
+const mates = s => legalMoves(s).filter(m => isMate(makeMove(s, m)));
+// a first move works for mate-in-2 if every defence still allows a mate next move
+const forcesMate = (s, m) => {
+  const a = makeMove(s, m), replies = legalMoves(a);
+  return replies.length > 0 && replies.every(r => mates(makeMove(a, r)).length > 0);
+};
+
+let track = localStorage.getItem('puzTrack') || 'm1';
+let prog = JSON.parse(localStorage.getItem('puzProgress') || '{"m1":0,"m2":0,"solved":{"m1":0,"m2":0},"streak":0}');
+let start, state, afterReply = null, solver, step, selected = -1, last = [], bad = -1, hintSq = -1, solved = false, failed = false, busy = false;
+
+function save() { localStorage.setItem('puzProgress', JSON.stringify(prog)); localStorage.setItem('puzTrack', track); }
+
+function load() {
+  const list = PUZZLES[track];
+  const idx = prog[track] % list.length;
+  start = fromFen(list[idx].fen);
+  state = start; solver = start.turn; step = 0;
+  selected = -1; last = []; bad = -1; hintSq = -1; solved = false; failed = false; busy = false;
+  $('who').textContent = `${solver === 'w' ? 'White' : 'Black'} to move`;
+  $('num').textContent = `#${idx + 1} of ${list.length}`;
+  $('msg').textContent = track === 'm1' ? 'Find checkmate in one move' : 'Find checkmate in two moves';
+  document.querySelectorAll('[data-track]').forEach(b => b.classList.toggle('on', b.dataset.track === track));
+  render();
+}
+
+const board = $('board'), squares = [];
+for (let d = 0; d < 64; d++) {
+  const el = document.createElement('div');
+  el.addEventListener('click', () => tap(view(d)));
+  board.appendChild(el); squares.push(el);
+}
+const view = d => solver === 'b' ? 63 - d : d;
+
+function render() {
+  const s = state;
+  const targets = selected >= 0 ? legalMoves(s).filter(m => m.from === selected).map(m => m.to) : [];
+  const checkSq = inCheck(s) ? s.b.indexOf(s.turn === 'w' ? 'K' : 'k') : -1;
+  squares.forEach((el, d) => {
+    const sq = view(d), r = sq >> 3, c = sq & 7, p = s.b[sq];
+    let cls = 'sq ' + ((r + c) % 2 ? 'dark' : 'light');
+    if (last.includes(sq)) cls += ' last';
+    if (sq === selected) cls += ' sel';
+    if (sq === hintSq) cls += ' hint';
+    if (sq === bad) cls += ' bad';
+    if (sq === checkSq) cls += ' check';
+    if (targets.includes(sq)) cls += p ? ' ring' : ' dot';
+    el.className = cls;
+    let html = p ? `<span class="${colorOf(p) === 'w' ? 'pw' : 'pb'}">${glyph(p)}</span>` : '';
+    if (d % 8 === 0) html += `<span class="coord r">${8 - r}</span>`;
+    if (d >= 56) html += `<span class="coord f">${'abcdefgh'[c]}</span>`;
+    el.innerHTML = html;
+  });
+  const sv = prog.solved;
+  $('stats').textContent = `Solved: ${sv.m1} mate-in-1 · ${sv.m2} mate-in-2 · Streak 🔥 ${prog.streak}`;
+  $('nextBtn').textContent = solved ? 'Next ›' : 'Skip ›';
+}
+
+function tap(sq) {
+  if (solved || busy || state.turn !== solver) return;
+  if (selected >= 0) {
+    const opts = legalMoves(state).filter(m => m.from === selected && m.to === sq);
+    if (opts.length) {
+      const m = opts.find(o => !o.promo || o.promo === 'q') || opts[0];
+      selected = -1;
+      tryMove(m);
+      return;
+    }
+  }
+  selected = state.b[sq] && colorOf(state.b[sq]) === solver && sq !== selected ? sq : -1;
+  render();
+}
+
+function tryMove(m) {
+  const after = makeMove(state, m);
+  const good = isMate(after) || (track === 'm2' && step === 0 && forcesMate(state, m));
+  if (!good) {
+    failed = true;
+    prog.streak = 0; save();
+    bad = m.to; state = after; last = [m.from, m.to];
+    render();
+    board.classList.remove('shake'); void board.offsetWidth; board.classList.add('shake');
+    $('msg').textContent = '❌ Not that one — try again';
+    if (navigator.vibrate) navigator.vibrate(120);
+    busy = true;
+    setTimeout(() => { // take the move back
+      state = step === 0 ? start : afterReply; bad = -1; last = []; busy = false; render();
+    }, 900);
+    return;
+  }
+  state = after; last = [m.from, m.to]; hintSq = -1;
+  if (isMate(state)) return win();
+  // mate in 2: the computer defends, then it's your turn to finish
+  step = 1; busy = true;
+  $('msg').textContent = '✅ Good! Now the computer defends…';
+  render();
+  setTimeout(() => {
+    const replies = legalMoves(state);
+    // prefer replies that leave only one way to mate, to make the finish a little harder
+    replies.sort((a, b) => mates(makeMove(state, a)).length - mates(makeMove(state, b)).length);
+    const r = replies[0];
+    state = makeMove(state, r); afterReply = state; last = [r.from, r.to]; busy = false;
+    $('msg').textContent = 'Now finish it — checkmate!';
+    render();
+  }, 700);
+}
+
+function win() {
+  solved = true;
+  if (!failed) prog.streak++;
+  prog.solved[track]++;
+  prog[track]++;
+  save();
+  $('msg').textContent = failed ? '✅ Checkmate! Got there in the end.' : '🎉 Checkmate! Perfect.';
+  if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
+  render();
+}
+
+$('hintBtn').onclick = () => {
+  if (solved || busy) return;
+  failed = true;
+  const s = state;
+  const m = step === 0 && track === 'm2' ? legalMoves(s).find(x => forcesMate(s, x)) : mates(s)[0];
+  if (m) { hintSq = m.from; selected = -1; render(); $('msg').textContent = '💡 Move the highlighted piece'; }
+};
+$('retryBtn').onclick = load;
+$('nextBtn').onclick = () => { if (!solved) { prog[track]++; prog.streak = 0; save(); } load(); };
+document.querySelectorAll('[data-track]').forEach(b => b.onclick = () => { track = b.dataset.track; save(); load(); });
+$('helpBtn').onclick = () => $('helpBox').classList.remove('hidden');
+$('helpClose').onclick = () => { $('helpBox').classList.add('hidden'); localStorage.setItem('puzHelp', 1); };
+
+load();
+if (!localStorage.getItem('puzHelp')) $('helpBox').classList.remove('hidden');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

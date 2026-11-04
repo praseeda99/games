@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Code Duel</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ffb020; --b: #ff4d6d; --w: min(94vw, 420px); }
+  .sec { width: var(--w); font-size: 12px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; opacity: .6; margin: 10px 0 6px; display: flex; justify-content: space-between; }
+  .rows { width: var(--w); display: flex; flex-direction: column; gap: 5px; }
+  .row { display: flex; align-items: center; gap: 8px; background: #13112e; border-radius: 12px; padding: 6px 10px; }
+  .row.cur { background: #231d52; box-shadow: 0 0 0 2px #6a58d8; }
+  .row .n { width: 18px; font-size: 11px; opacity: .45; font-weight: 700; }
+  .pegs { display: flex; gap: 7px; flex: 1; }
+  .peg { width: 28px; height: 28px; border-radius: 50%; background: #0b0b1a; box-shadow: inset 0 2px 4px rgba(0, 0, 0, .6); flex: none; }
+  .peg.f { box-shadow: inset 0 -3px 5px rgba(0, 0, 0, .35); }
+  .big .peg { width: 38px; height: 38px; }
+  .fbt { font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .fbt .h { color: #5f8; } .fbt .m { color: #fc3; }
+  .small .row { padding: 4px 10px; }
+  .small .peg { width: 18px; height: 18px; }
+  #palette { width: var(--w); display: flex; justify-content: center; gap: 10px; margin: 12px 0 8px; }
+  #palette button { width: 44px; height: 44px; border-radius: 50%; border: 0; box-shadow: inset 0 -4px 6px rgba(0, 0, 0, .35); }
+  #acts { display: flex; gap: 10px; justify-content: center; }
+  #secretBox { width: var(--w); display: flex; align-items: center; gap: 10px; background: #1c1640; border-radius: 12px; padding: 8px 12px; box-sizing: border-box; }
+  #secretBox .pegs .peg { width: 22px; height: 22px; }
+  .hint { width: var(--w); font-size: 14px; opacity: .75; text-align: center; margin: 6px 0; line-height: 1.4; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const LEN = 4, NC = 6, MAX = 10;
+const COLORS = ['#ff4d6d', '#ffb020', '#ffe94d', '#4dff88', '#33ccff', '#9d6bff'];
+
+function score(guess, code) {
+  let hit = 0, near = 0;
+  const g = [], c = [];
+  guess.forEach((x, i) => { if (x === code[i]) hit++; else { g.push(x); c.push(code[i]); } });
+  for (const x of g) { const k = c.indexOf(x); if (k >= 0) { near++; c.splice(k, 1); } }
+  return { hit, near };
+}
+const validCode = c => Array.isArray(c) && c.length === LEN && c.every(x => Number.isInteger(x) && x >= 0 && x < NC);
+// codes travel scrambled so they aren't readable at a glance on the relay
+const maskOf = (seed, side) => { const r = GZ.rng(seed + ':code:' + side); return Array.from({ length: LEN }, () => Math.floor(r() * NC)); };
+const encode = (code, seed, side) => { const m = maskOf(seed, side); return code.map((x, i) => (x + m[i]) % NC); };
+const decode = (code, seed, side) => { const m = maskOf(seed, side); return code.map((x, i) => (x - m[i] + NC) % NC); };
+
+const ALL = [];
+for (let n = 0; n < Math.pow(NC, LEN); n++) { const c = []; let k = n; for (let i = 0; i < LEN; i++) { c.push(k % NC); k = Math.floor(k / NC); } ALL.push(c); }
+
+let api, lastView, draft = [], draftFor = '';
+
+GZ.turnGame({
+  id: 'codeduel',
+  title: 'Code Duel',
+  sides: [{ name: 'Gold', color: '#ffb020' }, { name: 'Red', color: '#ff4d6d' }],
+  modes: ['online', 'cpu'],
+  help: `<ul><li>Each of you makes a <b>secret code</b> of 4 colors (repeats allowed) for the other to crack.</li>
+    <li>Take turns guessing your friend's code. After each guess you see:<br><b style="color:#5f8">● right spot</b> — right color in the right place<br>
+    <b style="color:#fc3">○ wrong spot</b> — right color, wrong place</li>
+    <li>Crack it in <b>fewer guesses</b> than your friend to win. If you both crack it in the same round, it's a draw.</li></ul>`,
+
+  init: seed => ({ seed, codes: [null, null], guesses: [[], []] }),
+  turn(s) {
+    if (!s.codes[0]) return 0;
+    if (!s.codes[1]) return 1;
+    return s.guesses[0].length > s.guesses[1].length ? 1 : 0;
+  },
+  apply(s, move, side) {
+    if (this.result(s)) return null;
+    if (!s.codes[side]) {
+      if (!move || !validCode(move.c)) return null;
+      const codes = s.codes.slice(); codes[side] = decode(move.c, s.seed, side);
+      return Object.assign({}, s, { codes });
+    }
+    if (!validCode(move)) return null;
+    const guesses = s.guesses.slice();
+    guesses[side] = guesses[side].concat(Object.assign({ g: move }, score(move, s.codes[1 - side])));
+    return Object.assign({}, s, { guesses });
+  },
+  result(s) {
+    if (!s.codes[0] || !s.codes[1]) return null;
+    const crack = i => { const k = s.guesses[i].findIndex(x => x.hit === LEN); return k < 0 ? 0 : k + 1; };
+    const a = crack(0), b = crack(1), la = s.guesses[0].length, lb = s.guesses[1].length;
+    const g = n => `${n} guess${n === 1 ? '' : 'es'}`;
+    if (a && b) return a === b ? { winner: null, reason: `both cracked it in ${g(a)}` } : { winner: a < b ? 0 : 1, reason: `cracked in ${g(Math.min(a, b))}` };
+    if (a && lb >= a) return { winner: 0, reason: `cracked in ${g(a)}` };
+    if (b) return { winner: 1, reason: `cracked in ${g(b)}` };
+    if (la >= MAX && lb >= MAX) return { winner: null, reason: 'nobody cracked a code' };
+    return null;
+  },
+  score: s => [0, 1].map(i => s.codes[0] && s.codes[1] ? `${s.guesses[i].length}/${MAX}` : ''),
+  status(s, v) {
+    if (this.result(s)) return null;
+    const me = v.me;
+    if (!s.codes[0] || !s.codes[1]) {
+      if (v.canPlay) return 'Make a secret code for your friend';
+      return v.mode === 'cpu' ? 'Computer is making a code…' : 'Waiting for your friend to make a code…';
+    }
+    if (v.canPlay) {
+      const theirs = s.guesses[1 - me], last = theirs[theirs.length - 1];
+      if (last && last.hit === LEN) return 'They cracked your code! Crack theirs now to tie!';
+      return 'Your turn — guess their code';
+    }
+    return null;
+  },
+  ai(s, side, level) {
+    if (!s.codes[side]) return { c: encode(ALL[Math.floor(Math.random() * ALL.length)], s.seed, side) };
+    const mine = s.guesses[side];
+    const fits = ALL.filter(c => mine.every(x => { const r = score(x.g, c); return r.hit === x.hit && r.near === x.near; }));
+    if (Math.random() < [0.4, 0.75, 1][level] && fits.length) return fits[Math.floor(Math.random() * fits.length)];
+    return ALL[Math.floor(Math.random() * ALL.length)];
+  },
+
+  mount(stage, a) {
+    api = a;
+    stage.innerHTML = `
+      <div class="hint" id="setupHint"></div>
+      <div class="sec"><span id="mainLab">Crack their code</span><span id="left"></span></div>
+      <div class="rows big" id="mainRows"></div>
+      <div id="palette"></div>
+      <div id="acts"><button class="btn" id="back">⌫</button><button class="btn main" id="go">Check</button></div>
+      <div class="sec" id="secLab"><span>Your secret code</span></div>
+      <div id="secretBox"><div class="pegs" id="secret"></div></div>
+      <div class="sec" id="theirLab"><span id="theirTitle">Their guesses at your code</span></div>
+      <div class="rows small" id="theirRows"></div>`;
+    COLORS.forEach((col, c) => {
+      const b = document.createElement('button');
+      b.style.background = col;
+      b.onclick = () => { if (draft.length < LEN) { draft.push(c); api.redraw(); } };
+      stage.querySelector('#palette').appendChild(b);
+    });
+    stage.querySelector('#back').onclick = () => { draft.pop(); api.redraw(); };
+    stage.querySelector('#go').onclick = () => {
+      if (draft.length !== LEN) return;
+      const s = api.state, side = lastView.me;
+      const move = !s.codes[side] ? { c: encode(draft, s.seed, side) } : draft.slice();
+      if (api.play(move)) draft = [];
+    };
+  },
+  draw(s, v) {
+    lastView = v;
+    const me = v.me === null ? 0 : v.me, foe = 1 - me;
+    const peg = c => `<div class="peg f" style="background:${COLORS[c]}"></div>`;
+    const empty = '<div class="peg"></div>';
+    const fb = x => `<span class="fbt"><span class="h">●${x.hit}</span> <span class="m">○${x.near}</span></span>`;
+    const setup = !s.codes[me];
+    const key = s.seed + (setup ? 'setup' : 'play') + s.guesses[me].length;
+    if (draftFor !== key) { draftFor = key; draft = []; }
+    const over = !!this.result(s);
+    const showInput = v.canPlay;
+
+    document.getElementById('setupHint').textContent = setup && v.canPlay ? 'Pick 4 colors. Your friend has to guess this code — make it tricky!' : '';
+    document.getElementById('mainLab').textContent = setup ? 'Your secret code' : 'Crack their code';
+    document.getElementById('left').textContent = setup ? '' : `${MAX - s.guesses[me].length} guesses left`;
+    let rows = '';
+    if (!setup) s.guesses[me].forEach((x, i) => { rows += `<div class="row"><span class="n">${i + 1}</span><div class="pegs">${x.g.map(peg).join('')}</div>${fb(x)}</div>`; });
+    if (showInput) rows += `<div class="row cur"><span class="n">${setup ? '🔒' : s.guesses[me].length + 1}</span><div class="pegs">${Array.from({ length: LEN }, (_, i) => draft[i] !== undefined ? peg(draft[i]) : empty).join('')}</div></div>`;
+    if (over && s.codes[foe]) rows += `<div class="row"><span class="n">🔓</span><div class="pegs">${s.codes[foe].map(peg).join('')}</div><span class="fbt">their code</span></div>`;
+    document.getElementById('mainRows').innerHTML = rows || '<div class="hint">Waiting…</div>';
+    document.getElementById('palette').classList.toggle('hidden', !showInput);
+    document.getElementById('acts').classList.toggle('hidden', !showInput);
+    document.getElementById('go').textContent = setup ? 'Lock it in' : 'Check';
+    document.getElementById('go').disabled = draft.length !== LEN;
+
+    const hasCode = !!s.codes[me];
+    document.getElementById('secLab').classList.toggle('hidden', !hasCode || v.me === null);
+    document.getElementById('secretBox').classList.toggle('hidden', !hasCode || v.me === null);
+    if (hasCode) document.getElementById('secret').innerHTML = s.codes[me].map(peg).join('');
+    const theirs = s.guesses[foe];
+    document.getElementById('theirLab').classList.toggle('hidden', !theirs.length);
+    document.getElementById('theirTitle').textContent = (v.mode === 'cpu' ? "Computer's" : "Friend's") + ' guesses at your code';
+    document.getElementById('theirRows').innerHTML = theirs.map((x, i) => `<div class="row"><span class="n">${i + 1}</span><div class="pegs">${x.g.map(peg).join('')}</div>${fb(x)}</div>`).join('');
+  },
+});
+</script>
+</body>
+</html>

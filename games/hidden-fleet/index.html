@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Hidden Fleet</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #33ccff; --b: #4dff88; }
+  .label { width: var(--w); font-size: 13px; font-weight: 700; opacity: .6; margin: 4px 0 6px; letter-spacing: 1px; text-transform: uppercase; display: flex; justify-content: space-between; }
+  .sea { display: grid; grid-template-columns: repeat(10, 1fr); grid-template-rows: repeat(10, 1fr); gap: 2px; aspect-ratio: 1;
+    background: #0e2a4a; border-radius: 12px; padding: 4px; box-sizing: border-box; }
+  #enemy { width: var(--w); box-shadow: 0 0 24px rgba(50, 200, 255, .25); }
+  #mine { width: min(60vw, 260px); }
+  .cell { border-radius: 4px; background: #123761; position: relative; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  #mine .cell { border-radius: 2px; }
+  .cell.ship { background: #7c8db5; }
+  .cell.miss::after { content: ''; width: 28%; height: 28%; border-radius: 50%; background: rgba(255, 255, 255, .45); }
+  .cell.hit { background: #ff4d6d; box-shadow: 0 0 10px #ff4d6d; }
+  .cell.sunk { background: #6b1a2c; box-shadow: none; }
+  .cell.sunk::after { content: '✕'; color: #ff9db0; font-weight: 800; }
+  .cell.last { outline: 2px solid #fff; outline-offset: -2px; }
+  #enemy.on .cell:not(.hit):not(.miss):not(.sunk) { cursor: pointer; }
+  #enemy.on .cell:not(.hit):not(.miss):not(.sunk):active { background: #2d6fb3; }
+  #setupBtns { display: flex; gap: 8px; margin-top: 12px; }
+  #fleetLeft { width: var(--w); display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; opacity: .8; margin-top: 8px; }
+  #fleetLeft span.gone { text-decoration: line-through; opacity: .4; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const N = 10, SHIPS = [5, 4, 3, 3, 2], SHIP_NAMES = ['Carrier (5)', 'Cruiser (4)', 'Sub (3)', 'Frigate (3)', 'Scout (2)'];
+
+function shipCells(cell, dir, len) {
+  const r = Math.floor(cell / N), c = cell % N, out = [];
+  for (let k = 0; k < len; k++) {
+    const rr = r + (dir ? k : 0), cc = c + (dir ? 0 : k);
+    if (rr >= N || cc >= N) return null;
+    out.push(rr * N + cc);
+  }
+  return out;
+}
+
+// fleet = [[cell, dir], ...] one per ship. Returns list of cell lists, or null if invalid.
+function fleetShips(fleet) {
+  if (!Array.isArray(fleet) || fleet.length !== SHIPS.length) return null;
+  const used = new Set(), ships = [];
+  for (let i = 0; i < SHIPS.length; i++) {
+    const [cell, dir] = fleet[i] || [];
+    if (!Number.isInteger(cell) || cell < 0 || cell >= N * N || (dir !== 0 && dir !== 1)) return null;
+    const cells = shipCells(cell, dir, SHIPS[i]);
+    if (!cells || cells.some(x => used.has(x))) return null;
+    cells.forEach(x => used.add(x));
+    ships.push(cells);
+  }
+  return ships;
+}
+
+function randomFleet(rand = Math.random) {
+  for (;;) {
+    const fleet = [], used = new Set();
+    let ok = true;
+    for (const len of SHIPS) {
+      let placed = false;
+      for (let tries = 0; tries < 200 && !placed; tries++) {
+        const dir = rand() < 0.5 ? 0 : 1, cell = Math.floor(rand() * N * N);
+        const cells = shipCells(cell, dir, len);
+        if (cells && !cells.some(x => used.has(x))) { cells.forEach(x => used.add(x)); fleet.push([cell, dir]); placed = true; }
+      }
+      if (!placed) { ok = false; break; }
+    }
+    if (ok) return fleet;
+  }
+}
+
+// Fleets travel scrambled so they aren't readable at a glance on the relay
+function mask(seed, side) { const r = GZ.rng(seed + ':fleet:' + side); return SHIPS.map(() => Math.floor(r() * 200)); }
+const encode = (fleet, seed, side) => { const m = mask(seed, side); return fleet.map(([c, d], i) => (c * 2 + d + m[i]) % 200); };
+const decode = (code, seed, side) => { const m = mask(seed, side); return code.map((x, i) => { const v = ((x - m[i]) % 200 + 200) % 200; return [v >> 1, v & 1]; }); };
+
+const sunkShips = (ships, shots) => ships.filter(cells => cells.every(c => shots.includes(c)));
+
+// ---------- computer ----------
+function aiShot(s, side, level) {
+  const shots = s.shots[side], foe = s.ships[1 - side];
+  const tried = new Set(shots);
+  const sunk = new Set(sunkShips(foe, shots).flat());
+  const hits = shots.filter(c => foe.some(sh => sh.includes(c)) && !sunk.has(c));
+  const open = [...Array(N * N).keys()].filter(c => !tried.has(c));
+  if (level === 0 && !hits.length) return open[Math.floor(Math.random() * open.length)];
+  if (level <= 1) {
+    if (hits.length) { // hunt around hits
+      const around = [];
+      for (const h of hits) for (const [dr, dc] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const r = Math.floor(h / N) + dr, c = h % N + dc;
+        if (r >= 0 && r < N && c >= 0 && c < N && !tried.has(r * N + c)) around.push(r * N + c);
+      }
+      if (around.length) return around[Math.floor(Math.random() * around.length)];
+    }
+    const parity = open.filter(c => (Math.floor(c / N) + c) % 2 === 0);
+    const pool = parity.length ? parity : open;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  // Hard: count every way the remaining ships could still fit, favoring spots next to hits
+  const alive = foe.filter(sh => !sh.every(c => tried.has(c))).map(sh => sh.length);
+  const misses = new Set(shots.filter(c => !foe.some(sh => sh.includes(c))));
+  const heat = new Array(N * N).fill(0);
+  for (const len of alive) for (let cell = 0; cell < N * N; cell++) for (const dir of [0, 1]) {
+    const cells = shipCells(cell, dir, len);
+    if (!cells || cells.some(c => misses.has(c) || sunk.has(c))) continue;
+    const covers = cells.filter(c => hits.includes(c)).length;
+    for (const c of cells) if (!tried.has(c)) heat[c] += 1 + covers * 30;
+  }
+  let best = open[0];
+  for (const c of open) if (heat[c] > heat[best] || (heat[c] === heat[best] && Math.random() < 0.3)) best = c;
+  return best;
+}
+
+// ---------- UI ----------
+let api, pending = null, lastSeed = null, lastView = null;
+const el = {};
+
+GZ.turnGame({
+  id: 'fleet',
+  title: 'Hidden Fleet',
+  sides: [{ name: 'Blue fleet', color: '#33ccff' }, { name: 'Green fleet', color: '#4dff88' }],
+  modes: ['online', 'cpu'],
+  help: `<ul><li>Each player secretly places 5 ships on a 10×10 sea.</li><li>Take turns firing at a square of your friend's sea.</li>
+    <li><b style="color:#ff4d6d">Red</b> = hit, dot = miss. Hit every square of a ship to <b>sink</b> it.</li>
+    <li>Sink the whole enemy fleet first to win.</li><li>Tap <b>Shuffle</b> to move your ships, then <b>Ready</b>.</li></ul>`,
+
+  init: seed => ({ seed, ships: [null, null], shots: [[], []], last: [-1, -1] }),
+  turn(s) {
+    if (!s.ships[0]) return 0;
+    if (!s.ships[1]) return 1;
+    return s.shots[0].length > s.shots[1].length ? 1 : 0;
+  },
+  apply(s, move, side) {
+    if (this.result(s)) return null;
+    if (!s.ships[side]) { // placing the fleet
+      if (!move || !Array.isArray(move.f)) return null;
+      const ships = fleetShips(decode(move.f, s.seed, side));
+      if (!ships) return null;
+      const all = s.ships.slice(); all[side] = ships;
+      return Object.assign({}, s, { ships: all });
+    }
+    if (!Number.isInteger(move) || move < 0 || move >= N * N || s.shots[side].includes(move)) return null;
+    const shots = s.shots.slice(); shots[side] = shots[side].concat(move);
+    const last = s.last.slice(); last[side] = move;
+    return Object.assign({}, s, { shots, last });
+  },
+  result(s) {
+    if (!s.ships[0] || !s.ships[1]) return null;
+    for (const side of [0, 1]) {
+      if (s.ships[1 - side].every(sh => sh.every(c => s.shots[side].includes(c)))) return { winner: side, reason: 'whole fleet sunk' };
+    }
+    return null;
+  },
+  score: s => s.ships[0] && s.ships[1] ? [0, 1].map(i => sunkShips(s.ships[1 - i], s.shots[i]).length + '/5') : ['', ''],
+  status(s, v) {
+    if (this.result(s)) return null;
+    if (!s.ships[0] || !s.ships[1]) {
+      if (v.canPlay) return 'Place your ships, then tap Ready';
+      if (v.thinking || v.mode === 'cpu') return 'Computer is placing ships…';
+      return v.me === null ? 'Ships are being placed…' : 'Waiting for your friend to place ships…';
+    }
+    if (v.canPlay) {
+      const prev = s.last[1 - v.me];
+      const hit = prev >= 0 && s.ships[v.me].some(sh => sh.includes(prev));
+      return (prev >= 0 ? (hit ? 'They hit you! ' : 'They missed. ') : '') + 'Your turn — fire!';
+    }
+    return null;
+  },
+
+  ai(s, side, level) {
+    if (!s.ships[side]) return { f: encode(randomFleet(), s.seed, side) };
+    return aiShot(s, side, level);
+  },
+
+  mount(stage, a) {
+    api = a;
+    stage.innerHTML = `
+      <div class="label"><span id="enemyLabel">Enemy sea</span><span id="hint"></span></div>
+      <div class="sea" id="enemy"></div>
+      <div id="fleetLeft"></div>
+      <div class="label" style="margin-top:14px;width:min(60vw,260px)"><span>Your fleet</span></div>
+      <div class="sea" id="mine"></div>
+      <div id="setupBtns"><button class="btn" id="shuffle">🔀 Shuffle</button><button class="btn main" id="ready">Ready</button></div>`;
+    for (const id of ['enemy', 'mine']) {
+      el[id] = [];
+      const g = stage.querySelector('#' + id);
+      for (let i = 0; i < N * N; i++) {
+        const c = document.createElement('div');
+        c.className = 'cell';
+        if (id === 'enemy') c.onclick = () => api.play(i);
+        g.appendChild(c);
+        el[id].push(c);
+      }
+    }
+    stage.querySelector('#shuffle').onclick = () => { pending = randomFleet(); this.draw(api.state, lastView); };
+    stage.querySelector('#ready').onclick = () => { if (pending) api.play({ f: encode(pending, api.state.seed, api.state.ships[0] ? 1 : 0) }); };
+  },
+  draw(s, v) {
+    lastView = v;
+    if (s.seed !== lastSeed) { lastSeed = s.seed; pending = randomFleet(); }
+    const me = v.me === null ? 0 : v.me, foe = 1 - me;
+    const setup = !s.ships[0] || !s.ships[1];
+    const placing = setup && v.canPlay && !s.ships[me];
+    document.getElementById('setupBtns').classList.toggle('hidden', !placing);
+    document.getElementById('enemy').classList.toggle('on', v.canPlay && !setup);
+    document.getElementById('enemy').style.opacity = setup ? .35 : 1;
+
+    // enemy sea: only my shots are visible (and their ships once the game is over)
+    const myShots = s.shots[me], foeShips = s.ships[foe] || [];
+    const sunkFoe = new Set(sunkShips(foeShips, myShots).flat());
+    const over = !!this.result(s);
+    el.enemy.forEach((c, i) => {
+      const isShip = foeShips.some(sh => sh.includes(i)), shot = myShots.includes(i);
+      c.className = 'cell' + (sunkFoe.has(i) ? ' sunk' : shot ? (isShip ? ' hit' : ' miss') : (over && isShip ? ' ship' : '')) + (i === s.last[me] ? ' last' : '');
+    });
+    // my sea: my ships plus their shots
+    const myShips = placing ? fleetShips(pending) : (s.ships[me] || []);
+    const theirShots = s.shots[foe];
+    const sunkMine = new Set(sunkShips(myShips, theirShots).flat());
+    el.mine.forEach((c, i) => {
+      const isShip = myShips.some(sh => sh.includes(i)), shot = theirShots.includes(i);
+      c.className = 'cell' + (sunkMine.has(i) ? ' sunk' : shot ? (isShip ? ' hit' : ' miss') : isShip ? ' ship' : '') + (i === s.last[foe] ? ' last' : '');
+    });
+    const sunkList = sunkShips(foeShips, myShots);
+    document.getElementById('fleetLeft').innerHTML = setup ? '' : 'Enemy ships: ' + SHIPS.map((len, k) =>
+      `<span class="${foeShips[k] && sunkList.includes(foeShips[k]) ? 'gone' : ''}">${SHIP_NAMES[k]}</span>`).join('');
+  },
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Lights Out</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ffe94d; --b: #ffb020; --w: min(92vw, 420px); }
+  #info { width: var(--w); display: flex; justify-content: space-between; font-weight: 700; margin: 4px 0 12px; }
+  #info small { display: block; font-size: 11px; opacity: .55; letter-spacing: 1px; }
+  #grid { width: var(--w); aspect-ratio: 1; display: grid; gap: 8px; }
+  .l { border-radius: 14%; border: 0; background: #1c1640; box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .3); transition: background .15s, box-shadow .15s; padding: 0; }
+  .l.on { background: radial-gradient(circle at 50% 40%, #fff7b0, #ffd23f 60%, #ffb020); box-shadow: 0 0 18px rgba(255, 210, 63, .7), inset 0 -4px 0 rgba(0, 0, 0, .15); }
+  .l.hint { outline: 3px dashed #4dff88; outline-offset: -3px; }
+  #tools { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
+  #levels { width: min(92vw, 420px); display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+  #levels button { aspect-ratio: 1; border-radius: 12px; border: 0; background: #1c1640; font-weight: 800; font-size: 16px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px; }
+  #levels button small { font-size: 9px; color: #ffd23f; letter-spacing: -1px; }
+  #levels button:disabled { opacity: .3; }
+  #levels button.cur { box-shadow: 0 0 0 2px #ffd23f; }
+  .stars { font-size: 34px; color: #ffd23f; letter-spacing: 4px; }
+</style>
+</head>
+<body>
+<div id="top"><a href="../../">&#8249;</a><h1>LIGHTS OUT</h1><button class="round" id="helpBtn">?</button></div>
+
+<div id="play">
+  <div id="info"><div><small>LEVEL</small><span id="lvl"></span></div><div style="text-align:center"><small>TAPS</small><span id="moves">0</span></div><div style="text-align:right"><small>PAR</small><span id="par"></span></div></div>
+  <div id="grid"></div>
+  <div id="tools">
+    <button class="btn" id="resetBtn">↺ Restart</button>
+    <button class="btn" id="hintBtn">💡 Hint</button>
+    <button class="btn" id="levelsBtn">Levels</button>
+  </div>
+</div>
+
+<div id="levelBox" class="overlay hidden"><div class="card"><h2>Levels</h2><div id="levels"></div><button class="btn" id="levelsClose">Close</button></div></div>
+<div id="winBox" class="overlay hidden"><div class="card">
+  <h2>Lights out! 🌙</h2><div class="stars" id="stars"></div><p id="winText"></p>
+  <button class="btn main" id="nextBtn">Next level</button>
+</div></div>
+<div id="helpBox" class="overlay hidden"><div class="card help">
+  <h2>How to play</h2>
+  <ul><li>Tap a light to flip it <b>and</b> the lights above, below, left and right of it.</li>
+  <li>Turn <b>every</b> light off to win the level.</li><li>Finish in "par" taps or fewer for ⭐⭐⭐.</li>
+  <li>Stuck? A hint shows a light that's part of the solution.</li></ul>
+  <button class="btn main" id="helpClose">Got it</button>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const LEVELS = 50;
+const sizeFor = lv => lv <= 15 ? 5 : lv <= 35 ? 6 : 7;
+
+function rng(seed) { let a = seed * 2654435761 >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// Each level is made by pressing some random lights on a dark board, so it can always be solved
+function makeLevel(lv) {
+  const n = sizeFor(lv), r = rng(lv * 7919 + 13);
+  const presses = new Set();
+  const want = Math.min(n * n - 2, 3 + Math.floor(lv * 0.45));
+  while (presses.size < want) presses.add(Math.floor(r() * n * n));
+  const b = new Array(n * n).fill(0);
+  for (const p of presses) toggle(b, n, p);
+  return { n, b, par: solve(b, n).filter(Boolean).length };
+}
+function toggle(b, n, i) {
+  const r = Math.floor(i / n), c = i % n;
+  for (const [dr, dc] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const rr = r + dr, cc = c + dc;
+    if (rr >= 0 && rr < n && cc >= 0 && cc < n) b[rr * n + cc] ^= 1;
+  }
+}
+// Shortest set of taps that turns everything off (linear algebra over on/off, trying every free choice)
+function solve(b, n) {
+  const N = n * n, rows = [];
+  for (let i = 0; i < N; i++) {
+    const row = new Array(N + 1).fill(0);
+    const t = new Array(N).fill(0); toggle(t, n, i);
+    for (let j = 0; j < N; j++) if (t[j]) row[j] = 1; // tapping j affects i (the effect is symmetric)
+    row[N] = b[i];
+    rows.push(row);
+  }
+  const pivots = [];
+  let r = 0;
+  for (let c = 0; c < N && r < N; c++) {
+    let p = rows.findIndex((row, k) => k >= r && row[c]);
+    if (p < 0) continue;
+    [rows[r], rows[p]] = [rows[p], rows[r]];
+    for (let k = 0; k < N; k++) if (k !== r && rows[k][c]) for (let j = 0; j <= N; j++) rows[k][j] ^= rows[r][j];
+    pivots.push(c); r++;
+  }
+  const free = [...Array(N).keys()].filter(c => !pivots.includes(c));
+  let best = null;
+  for (let mask = 0; mask < (1 << free.length); mask++) {
+    const x = new Array(N).fill(0);
+    free.forEach((c, k) => { x[c] = (mask >> k) & 1; });
+    pivots.forEach((c, k) => {
+      let v = rows[k][N];
+      for (const f of free) if (rows[k][f]) v ^= x[f];
+      x[c] = v;
+    });
+    if (!best || x.filter(Boolean).length < best.filter(Boolean).length) best = x;
+  }
+  return best;
+}
+
+let lv, L, board, moves, hint = -1;
+const progress = () => JSON.parse(localStorage.getItem('lightsProgress') || '{"stars":{}}');
+
+function load(level) {
+  lv = level; L = makeLevel(lv); board = L.b.slice(); moves = 0; hint = -1;
+  localStorage.setItem('lightsLevel', lv);
+  const g = $('grid');
+  g.style.gridTemplateColumns = `repeat(${L.n}, 1fr)`;
+  g.style.gap = L.n > 5 ? '6px' : '8px';
+  g.innerHTML = '';
+  board.forEach((_, i) => {
+    const b = document.createElement('button');
+    b.className = 'l';
+    b.onclick = () => tap(i);
+    g.appendChild(b);
+  });
+  draw();
+}
+function draw() {
+  [...$('grid').children].forEach((el, i) => el.className = 'l' + (board[i] ? ' on' : '') + (i === hint ? ' hint' : ''));
+  $('lvl').textContent = `${lv} / ${LEVELS}`;
+  $('moves').textContent = moves;
+  $('par').textContent = L.par;
+}
+function tap(i) {
+  if (board.every(x => !x)) return;
+  toggle(board, L.n, i);
+  moves++;
+  if (i === hint) hint = -1;
+  if (navigator.vibrate) navigator.vibrate(6);
+  draw();
+  if (board.every(x => !x)) win();
+}
+function win() {
+  const stars = moves <= L.par ? 3 : moves <= L.par + 4 ? 2 : 1;
+  const p = progress();
+  p.stars[lv] = Math.max(p.stars[lv] || 0, stars);
+  localStorage.setItem('lightsProgress', JSON.stringify(p));
+  $('stars').textContent = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+  $('winText').textContent = `${moves} taps · par ${L.par}`;
+  $('nextBtn').textContent = lv < LEVELS ? 'Next level' : 'Play again from level 1';
+  setTimeout(() => $('winBox').classList.remove('hidden'), 350);
+  if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
+}
+
+$('resetBtn').onclick = () => { board = L.b.slice(); moves = 0; hint = -1; draw(); };
+$('hintBtn').onclick = () => {
+  const sol = solve(board, L.n);
+  const taps = sol.map((v, i) => v ? i : -1).filter(i => i >= 0);
+  if (taps.length) { hint = taps[Math.floor(Math.random() * taps.length)]; draw(); }
+};
+$('nextBtn').onclick = () => { $('winBox').classList.add('hidden'); load(lv < LEVELS ? lv + 1 : 1); };
+$('levelsBtn').onclick = () => {
+  const p = progress(), box = $('levels');
+  box.innerHTML = '';
+  for (let k = 1; k <= LEVELS; k++) {
+    const b = document.createElement('button');
+    const st = p.stars[k] || 0;
+    b.innerHTML = `${k}<small>${st ? '★'.repeat(st) : ''}</small>`;
+    b.disabled = k > 1 && !p.stars[k - 1] && !p.stars[k];
+    if (k === lv) b.className = 'cur';
+    b.onclick = () => { $('levelBox').classList.add('hidden'); load(k); };
+    box.appendChild(b);
+  }
+  $('levelBox').classList.remove('hidden');
+};
+$('levelsClose').onclick = () => $('levelBox').classList.add('hidden');
+$('helpBtn').onclick = () => $('helpBox').classList.remove('hidden');
+$('helpClose').onclick = () => { $('helpBox').classList.add('hidden'); localStorage.setItem('lightsHelp', 1); };
+
+load(+localStorage.getItem('lightsLevel') || 1);
+if (!localStorage.getItem('lightsHelp')) $('helpBox').classList.remove('hidden');
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

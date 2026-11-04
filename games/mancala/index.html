@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Mancala</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ffb020; --b: #9d6bff; }
+  #mb { width: var(--w); display: grid; grid-template-columns: .9fr repeat(6, 1fr) .9fr; grid-template-rows: 1fr 1fr; gap: 5px;
+    background: linear-gradient(145deg, #5b3a1e, #3d2611); border-radius: 22px; padding: 10px; box-sizing: border-box; box-shadow: 0 0 30px rgba(255, 176, 32, .2); }
+  .pit, .store { background: #2a1808; border-radius: 999px; box-shadow: inset 0 4px 10px rgba(0, 0, 0, .7); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; position: relative; min-width: 0; }
+  .pit { aspect-ratio: 3 / 4; border-radius: 40%; }
+  .store { grid-row: 1 / 3; border-radius: 24px; }
+  .n { font-weight: 800; font-size: 19px; z-index: 1; text-shadow: 0 1px 2px #000; }
+  .seeds { position: absolute; inset: 14%; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 1px; opacity: .85; }
+  .seeds i { width: 22%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #9bd); }
+  .store .seeds i { width: 30%; }
+  .pit.mine.can { box-shadow: inset 0 4px 10px rgba(0, 0, 0, .7), 0 0 0 3px var(--a); cursor: pointer; }
+  .pit.last, .store.last { box-shadow: inset 0 4px 10px rgba(0, 0, 0, .7), 0 0 0 2px #fff; }
+  .lab { width: var(--w); display: flex; justify-content: space-between; font-size: 12px; opacity: .6; font-weight: 700; margin: 6px 0; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+// Pits 0-5 + store 6 belong to side 0; pits 7-12 + store 13 belong to side 1.
+const STORE = [6, 13];
+
+function sow(p, side, m) {
+  p = p.slice();
+  const start = side * 7 + m;
+  let seeds = p[start], idx = start;
+  p[start] = 0;
+  while (seeds) {
+    idx = (idx + 1) % 14;
+    if (idx === STORE[1 - side]) continue;
+    p[idx]++; seeds--;
+  }
+  let again = idx === STORE[side];
+  const mineRange = side === 0 ? idx <= 5 : idx >= 7 && idx <= 12;
+  if (!again && mineRange && p[idx] === 1 && p[12 - idx] > 0) { // capture
+    p[STORE[side]] += p[12 - idx] + 1;
+    p[12 - idx] = 0; p[idx] = 0;
+  }
+  let over = false;
+  const empty0 = p.slice(0, 6).every(x => !x), empty1 = p.slice(7, 13).every(x => !x);
+  if (empty0 || empty1) {
+    for (let i = 0; i < 6; i++) { p[6] += p[i]; p[i] = 0; p[13] += p[7 + i]; p[7 + i] = 0; }
+    over = true; again = false;
+  }
+  return { p, again, over, last: idx };
+}
+
+// ---------- computer ----------
+function search(p, side, me, depth, alpha, beta) {
+  const moves = [0, 1, 2, 3, 4, 5].filter(m => p[side * 7 + m] > 0);
+  if (!moves.length || depth === 0) return p[STORE[me]] - p[STORE[1 - me]];
+  const maxing = side === me;
+  let best = maxing ? -Infinity : Infinity;
+  for (const m of moves) {
+    const r = sow(p, side, m);
+    const v = r.over ? (r.p[STORE[me]] - r.p[STORE[1 - me]]) * 100
+      : search(r.p, r.again ? side : 1 - side, me, depth - 1, alpha, beta);
+    if (maxing) { best = Math.max(best, v); alpha = Math.max(alpha, v); }
+    else { best = Math.min(best, v); beta = Math.min(beta, v); }
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+let api, slots = {}, lastView;
+
+GZ.turnGame({
+  id: 'mancala',
+  title: 'Mancala',
+  sides: [{ name: 'South', color: '#ffb020' }, { name: 'North', color: '#9d6bff' }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>Tap one of <b>your</b> pits (bottom row). Its seeds are dropped one by one into the next pits, going right and around.</li>
+    <li>Seeds dropped in <b>your store</b> (big pit on your right) are your points.</li>
+    <li>Last seed in your store? <b>Go again!</b></li>
+    <li>Last seed in an <b>empty pit on your side</b>? Capture it plus all seeds in the pit across.</li>
+    <li>When one side runs out, the other side keeps their leftover seeds. Most seeds in store wins.</li></ul>`,
+
+  init: () => ({ p: [4, 4, 4, 4, 4, 4, 0, 4, 4, 4, 4, 4, 4, 0], cur: 0, over: false, last: -1, again: false }),
+  turn: s => s.cur,
+  apply(s, m, side) {
+    if (s.over || !Number.isInteger(m) || m < 0 || m > 5 || !s.p[side * 7 + m]) return null;
+    const r = sow(s.p, side, m);
+    return { p: r.p, cur: r.again ? side : 1 - side, over: r.over, last: r.last, again: r.again };
+  },
+  result(s) {
+    if (!s.over) return null;
+    const [a, b] = [s.p[6], s.p[13]];
+    return { winner: a === b ? null : a > b ? 0 : 1, reason: `${Math.max(a, b)} seeds to ${Math.min(a, b)}` };
+  },
+  score: s => [s.p[6], s.p[13]],
+  status(s, v) {
+    if (s.over || !s.again) return null;
+    return v.canPlay ? 'Landed in the store — go again!' : null;
+  },
+  ai(s, side, level) {
+    const moves = [0, 1, 2, 3, 4, 5].filter(m => s.p[side * 7 + m] > 0);
+    if (level === 0 && Math.random() < 0.4) return moves[Math.floor(Math.random() * moves.length)];
+    const depth = [2, 5, 8][level];
+    let best = moves[0], bestV = -Infinity;
+    for (const m of moves) {
+      const r = sow(s.p, side, m);
+      const v = (r.over ? (r.p[STORE[side]] - r.p[STORE[1 - side]]) * 100 : search(r.p, r.again ? side : 1 - side, side, depth - 1, -Infinity, Infinity)) + Math.random() * 0.5;
+      if (v > bestV) { bestV = v; best = m; }
+    }
+    return best;
+  },
+
+  mount(stage, a) {
+    api = a;
+    stage.innerHTML = '<div class="lab"><span id="topLab"></span></div><div id="mb"></div><div class="lab"><span></span><span id="botLab"></span></div>';
+    const mb = stage.querySelector('#mb');
+    // 14 slots positioned by CSS grid; which pit goes where depends on who is viewing
+    for (let k = 0; k < 14; k++) {
+      const d = document.createElement('div');
+      d.innerHTML = '<span class="n"></span><div class="seeds"></div>';
+      mb.appendChild(d);
+      slots[k] = d;
+    }
+  },
+  draw(s, v) {
+    lastView = v;
+    const me = v.mode === 'local' ? 0 : (v.me === null ? 0 : v.me), foe = 1 - me;
+    // bottom row: my pits left→right; top row: their pits right→left; my store on the right
+    const layout = [];
+    for (let m = 0; m < 6; m++) layout.push([me * 7 + m, 2, m + 2]);
+    for (let m = 0; m < 6; m++) layout.push([foe * 7 + m, 1, 7 - m]);
+    layout.push([STORE[me], '1 / 3', 8], [STORE[foe], '1 / 3', 1]);
+    const turnSide = s.cur;
+    layout.forEach(([idx, row, col], k) => {
+      const d = slots[k];
+      const isStore = idx === 6 || idx === 13;
+      const owner = idx < 7 ? 0 : 1;
+      const can = v.canPlay && !isStore && owner === turnSide && s.p[idx] > 0;
+      d.className = (isStore ? 'store' : 'pit') + (owner === turnSide && !isStore ? ' mine' : '') + (can ? ' can' : '') + (idx === s.last ? ' last' : '');
+      d.style.gridRow = row; d.style.gridColumn = col;
+      d.querySelector('.n').textContent = s.p[idx];
+      d.querySelector('.seeds').innerHTML = '<i></i>'.repeat(Math.min(s.p[idx], isStore ? 24 : 12));
+      d.onclick = can ? () => api.play(idx % 7) : null;
+    });
+    const whose = i => v.mode === 'local' ? this.sides[i].name + "'s" : i === me ? 'Your' : v.mode === 'cpu' ? "Computer's" : "Friend's";
+    document.getElementById('topLab').textContent = '↑ ' + whose(foe) + ' side';
+    document.getElementById('botLab').textContent = whose(me) + ' side ↓  ·  store on the right →';
+  },
+});
+</script>
+</body>
+</html>

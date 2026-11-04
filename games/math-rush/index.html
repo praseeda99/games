@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Math Rush</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #4dff88; --b: #33ccff; --w: min(94vw, 420px); }
+  #game { width: var(--w); display: flex; flex-direction: column; align-items: center; }
+  #hud { width: 100%; display: flex; justify-content: space-between; align-items: center; font-weight: 800; font-size: 20px; margin: 6px 0 10px; }
+  #hud small { display: block; font-size: 11px; opacity: .55; letter-spacing: 1px; font-weight: 700; }
+  #timebar { width: 100%; height: 10px; background: #1c1640; border-radius: 5px; overflow: hidden; }
+  #timebar i { display: block; height: 100%; background: linear-gradient(90deg, var(--a), var(--b)); }
+  #timebar.low i { background: #ff4d6d; }
+  #q { font-size: clamp(44px, 14vw, 64px); font-weight: 900; margin: 40px 0 34px; letter-spacing: 1px; text-align: center; min-height: 80px; }
+  #q.ok { animation: ok .3s; } #q.bad { animation: bad .35s; }
+  @keyframes ok { 50% { color: #4dff88; transform: scale(1.06); } }
+  @keyframes bad { 25% { transform: translateX(-8px); color: #ff4d6d; } 75% { transform: translateX(8px); color: #ff4d6d; } }
+  #choices { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  #choices button { font-size: 30px; font-weight: 800; padding: 22px 0; border-radius: 18px; border: 0; background: #1c1640; color: #fff; }
+  #choices button:active { background: #2e2670; }
+  #streak { margin-top: 18px; font-weight: 800; color: #ffd23f; min-height: 24px; }
+  #pop { position: fixed; left: 50%; top: 40%; transform: translate(-50%, 0); font-weight: 900; font-size: 22px; pointer-events: none; opacity: 0; }
+  #pop.go { animation: rise .7s ease-out; }
+  @keyframes rise { 0% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -50px); } }
+</style>
+</head>
+<body>
+<div id="top"><a href="../../">&#8249;</a><h1>MATH RUSH</h1></div>
+
+<div id="menu">
+  <button class="opt" data-mode="mixed"><span class="e">🧮</span><span><b>Mixed</b><small id="b-mixed">Everything: + − × ÷</small></span></button>
+  <button class="opt" data-mode="addsub"><span class="e">➕</span><span><b>Plus &amp; minus</b><small id="b-addsub"></small></span></button>
+  <button class="opt" data-mode="times"><span class="e">✖️</span><span><b>Times tables</b><small id="b-times"></small></span></button>
+  <p style="opacity:.6;text-align:center;line-height:1.5">60 seconds. Tap the right answer.<br>Streaks multiply your points. Wrong answers cost 3 seconds.</p>
+</div>
+
+<div id="game" class="hidden">
+  <div id="hud"><div><small>SCORE</small><span id="score">0</span></div><div style="text-align:right"><small>TIME</small><span id="time">60</span></div></div>
+  <div id="timebar"><i></i></div>
+  <div id="q"></div>
+  <div id="choices"></div>
+  <div id="streak"></div>
+</div>
+<div id="pop"></div>
+
+<div id="end" class="overlay hidden"><div class="card">
+  <h2>Time's up!</h2>
+  <p style="font-size:44px;font-weight:900;opacity:1" id="final"></p>
+  <p id="endInfo"></p>
+  <button class="btn main" id="again">Play again</button>
+  <button class="btn" id="toMenu">Change mode</button>
+</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TIME = 60;
+const NAMES = { mixed: 'Mixed', addsub: 'Plus & minus', times: 'Times tables' };
+let mode, score, streak, solved, wrong, endAt, answer, timer, level;
+
+const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+
+// Problems get bigger as you solve more
+function makeQuestion() {
+  level = Math.min(10, Math.floor(solved / 4));
+  const ops = mode === 'addsub' ? ['+', '−'] : mode === 'times' ? ['×', '÷'] : ['+', '−', '×', '÷'];
+  const op = ops[ri(0, ops.length - 1)];
+  let a, b;
+  if (op === '+') { a = ri(2, 10 + level * 9); b = ri(2, 10 + level * 9); answer = a + b; }
+  else if (op === '−') { a = ri(5, 15 + level * 10); b = ri(1, a); answer = a - b; }
+  else if (op === '×') { a = ri(2, Math.min(12, 5 + level)); b = ri(2, Math.min(15, 6 + level)); answer = a * b; }
+  else { b = ri(2, Math.min(12, 5 + level)); answer = ri(2, Math.min(12, 5 + level)); a = b * answer; }
+  $('q').textContent = `${a} ${op} ${b}`;
+  // wrong answers that look believable
+  const opts = new Set([answer]);
+  const near = [1, 2, 10, -1, -2, -10, b, -b, 5, -5];
+  while (opts.size < 4) {
+    const w = answer + near[ri(0, near.length - 1)];
+    if (w >= 0 && w !== answer) opts.add(w);
+    if (opts.size < 4 && Math.random() < 0.2) opts.add(answer + ri(3, 9));
+  }
+  const list = [...opts].slice(0, 4).sort(() => Math.random() - 0.5);
+  $('choices').innerHTML = '';
+  for (const v of list) {
+    const btn = document.createElement('button');
+    btn.textContent = v;
+    btn.onclick = () => pick(v);
+    $('choices').appendChild(btn);
+  }
+}
+
+function flash(cls) { const q = $('q'); q.classList.remove('ok', 'bad'); void q.offsetWidth; q.classList.add(cls); }
+function pop(text, color) { const p = $('pop'); p.textContent = text; p.style.color = color; p.classList.remove('go'); void p.offsetWidth; p.classList.add('go'); }
+
+function pick(v) {
+  if (Date.now() >= endAt) return;
+  if (v === answer) {
+    streak++; solved++;
+    const mult = 1 + Math.floor(streak / 5);
+    score += 10 * mult;
+    pop('+' + 10 * mult, '#4dff88');
+    flash('ok');
+    if (navigator.vibrate) navigator.vibrate(8);
+  } else {
+    streak = 0; wrong++;
+    endAt -= 3000;
+    pop('−3s', '#ff4d6d');
+    flash('bad');
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+  $('score').textContent = score;
+  $('streak').textContent = streak >= 3 ? `🔥 ${streak} streak · ×${1 + Math.floor(streak / 5)}` : '';
+  makeQuestion();
+}
+
+function start(m) {
+  mode = m; score = 0; streak = 0; solved = 0; wrong = 0;
+  endAt = Date.now() + TIME * 1000;
+  $('menu').classList.add('hidden'); $('end').classList.add('hidden'); $('game').classList.remove('hidden');
+  $('score').textContent = 0; $('streak').textContent = '';
+  makeQuestion();
+  clearInterval(timer);
+  timer = setInterval(() => {
+    const left = Math.max(0, endAt - Date.now());
+    $('time').textContent = Math.ceil(left / 1000);
+    $('timebar').firstChild.style.width = (left / TIME / 10) + '%';
+    $('timebar').classList.toggle('low', left < 10000);
+    if (left <= 0) finish();
+  }, 100);
+}
+
+function finish() {
+  clearInterval(timer);
+  const key = 'mathBest_' + mode, best = +localStorage.getItem(key) || 0;
+  if (score > best) localStorage.setItem(key, score);
+  $('final').textContent = score;
+  $('endInfo').textContent = `${solved} right · ${wrong} wrong` + (score > best ? ' · NEW BEST!' : ` · Best: ${best}`);
+  $('end').classList.remove('hidden');
+}
+
+function showMenu() {
+  clearInterval(timer);
+  $('game').classList.add('hidden'); $('end').classList.add('hidden'); $('menu').classList.remove('hidden');
+  for (const m of Object.keys(NAMES)) {
+    const b = +localStorage.getItem('mathBest_' + m);
+    const base = { mixed: 'Everything: + − × ÷', addsub: 'Adding and taking away', times: 'Multiply and divide' }[m];
+    $('b-' + m).textContent = base + (b ? ` · Best ${b}` : '');
+  }
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => start(b.dataset.mode));
+$('again').onclick = () => start(mode);
+$('toMenu').onclick = showMenu;
+showMenu();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

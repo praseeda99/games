@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Five in a Row</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ffb020; --b: #ff4d6d; --w: min(96vw, 62vh, 520px); }
+  #board { width: var(--w); aspect-ratio: 1; display: grid; grid-template-columns: repeat(15, 1fr); grid-template-rows: repeat(15, 1fr);
+    background: #d9a95b; border-radius: 10px; padding: 3px; box-sizing: border-box; box-shadow: 0 0 30px rgba(255, 176, 32, .25); }
+  .pt { position: relative; min-width: 0; min-height: 0; }
+  .pt::before { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(60, 30, 0, .45); }
+  .pt::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: rgba(60, 30, 0, .45); }
+  .pt.l::before { left: 50%; } .pt.r::before { right: 50%; } .pt.t::after { top: 50%; } .pt.b::after { bottom: 50%; }
+  .st { position: absolute; inset: 7%; border-radius: 50%; z-index: 1; }
+  .st.s0 { background: radial-gradient(circle at 35% 30%, #555, #0d0d0d); box-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+  .st.s1 { background: radial-gradient(circle at 35% 30%, #fff, #d4d4dc); box-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
+  .st.ghost { opacity: .5; }
+  .st.win { box-shadow: 0 0 0 2px #ff4d6d, 0 0 8px #ff4d6d; }
+  .st.last::after { content: ''; position: absolute; inset: 35%; border-radius: 50%; background: #ff4d6d; }
+  #tip { font-size: 13px; opacity: .55; margin-top: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+const N = 15;
+const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+function lineAt(b, i, side) { // returns the 5+ winning cells through i, if any
+  const r = Math.floor(i / N), c = i % N;
+  for (const [dr, dc] of DIRS) {
+    const cells = [i];
+    for (const s of [1, -1]) {
+      let rr = r + dr * s, cc = c + dc * s;
+      while (rr >= 0 && rr < N && cc >= 0 && cc < N && b[rr * N + cc] === side) { cells.push(rr * N + cc); rr += dr * s; cc += dc * s; }
+    }
+    if (cells.length >= 5) return cells;
+  }
+  return null;
+}
+
+// ---------- computer: score each empty point by the lines it would make for both players ----------
+const SHAPE = (count, open) => {
+  if (count >= 5) return 1e6;
+  if (count === 4) return open === 2 ? 1e5 : open === 1 ? 1e4 : 0;
+  if (count === 3) return open === 2 ? 5000 : open === 1 ? 400 : 0;
+  if (count === 2) return open === 2 ? 300 : open === 1 ? 30 : 0;
+  return open === 2 ? 10 : 1;
+};
+function pointValue(b, i, side) {
+  const r = Math.floor(i / N), c = i % N;
+  let v = 0;
+  for (const [dr, dc] of DIRS) {
+    let count = 1, open = 0;
+    for (const s of [1, -1]) {
+      let rr = r + dr * s, cc = c + dc * s;
+      while (rr >= 0 && rr < N && cc >= 0 && cc < N && b[rr * N + cc] === side) { count++; rr += dr * s; cc += dc * s; }
+      if (rr >= 0 && rr < N && cc >= 0 && cc < N && b[rr * N + cc] < 0) open++;
+    }
+    v += SHAPE(count, open);
+  }
+  return v;
+}
+function aiMove(s, side, level) {
+  if (s.n === 0) return 7 * N + 7;
+  const near = [];
+  for (let i = 0; i < N * N; i++) {
+    if (s.b[i] >= 0) continue;
+    const r = Math.floor(i / N), c = i % N;
+    let close = false;
+    for (let dr = -2; dr <= 2 && !close; dr++) for (let dc = -2; dc <= 2; dc++) {
+      const rr = r + dr, cc = c + dc;
+      if (rr >= 0 && rr < N && cc >= 0 && cc < N && s.b[rr * N + cc] >= 0) { close = true; break; }
+    }
+    if (close) near.push(i);
+  }
+  const defend = [0.6, 0.9, 1.05][level], noise = [0.6, 0.15, 0.02][level];
+  let best = near[0], bestV = -1;
+  for (const i of near) {
+    const v = (pointValue(s.b, i, side) + defend * pointValue(s.b, i, 1 - side)) * (1 + Math.random() * noise);
+    if (v > bestV) { bestV = v; best = i; }
+  }
+  return best;
+}
+
+let api, pts = [], ghost = -1;
+
+GZ.turnGame({
+  id: 'five',
+  title: 'Five in a Row',
+  sides: [{ name: 'Black', color: '#777' }, { name: 'White', color: '#f2f2f2' }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>Take turns placing stones where the lines cross.</li><li>First to get <b>5 in a row</b> wins — across, up-down or diagonal.</li>
+    <li>Block your friend when they have 3 or 4 in a row with open ends!</li><li>Tap once to aim, tap the same spot again to place.</li></ul>`,
+
+  init: () => ({ b: new Array(N * N).fill(-1), n: 0, last: -1, win: null }),
+  turn: s => s.n % 2,
+  apply(s, i, side) {
+    if (s.win || s.n === N * N || !Number.isInteger(i) || i < 0 || i >= N * N || s.b[i] >= 0) return null;
+    const b = s.b.slice();
+    b[i] = side;
+    return { b, n: s.n + 1, last: i, win: lineAt(b, i, side) ? { side, cells: lineAt(b, i, side) } : null };
+  },
+  result(s) {
+    if (s.win) return { winner: s.win.side, reason: 'five in a row' };
+    if (s.n === N * N) return { winner: null, reason: 'the board is full' };
+    return null;
+  },
+  ai: (s, side, level) => aiMove(s, side, level),
+
+  mount(stage, a) {
+    api = a;
+    const board = document.createElement('div');
+    board.id = 'board';
+    for (let i = 0; i < N * N; i++) {
+      const r = Math.floor(i / N), c = i % N, el = document.createElement('div');
+      el.className = 'pt' + (c === 0 ? ' l' : '') + (c === N - 1 ? ' r' : '') + (r === 0 ? ' t' : '') + (r === N - 1 ? ' b' : '');
+      el.onclick = () => {
+        if (!api.state || api.state.b[i] >= 0) return;
+        if (ghost === i) { ghost = -1; api.play(i); } else { ghost = i; api.redraw(); }
+      };
+      board.appendChild(el);
+      pts.push(el);
+    }
+    stage.appendChild(board);
+    stage.insertAdjacentHTML('beforeend', '<div id="tip">Tap once to aim · tap again to place</div>');
+  },
+  draw(s, v) {
+    if (!v.canPlay || s.b[ghost] >= 0) ghost = -1;
+    const wins = s.win ? s.win.cells : [];
+    pts.forEach((el, i) => {
+      const p = s.b[i];
+      const want = p >= 0 ? `st s${p}${wins.includes(i) ? ' win' : ''}${i === s.last && !s.win ? ' last' : ''}` : i === ghost ? `st s${s.n % 2} ghost` : '';
+      const cur = el.firstChild ? el.firstChild.className : '';
+      if (cur !== want) el.innerHTML = want ? `<div class="${want}"></div>` : '';
+    });
+  },
+});
+</script>
+</body>
+</html>

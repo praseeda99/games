@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Checkers</title>
+<link rel="stylesheet" href="../shared/gz.css">
+<style>
+  :root { --a: #ff4d6d; --b: #f2f2f2; --w: min(94vw, 62vh, 480px); }
+  #board { width: var(--w); aspect-ratio: 1; display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr);
+    border-radius: 12px; overflow: hidden; box-shadow: 0 0 30px rgba(255, 77, 109, .25); }
+  .sq { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+  .lt { background: #e9d9c4; } .dk { background: #5a3e9c; }
+  .dk.last { background: #7d5fc7; }
+  .dk.sel { background: #3fa877; }
+  .dk.target::after { content: ''; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: rgba(255, 255, 255, .45); }
+  .pc { width: 78%; height: 78%; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--w) / 8 * .4); box-shadow: inset 0 -5px 0 rgba(0, 0, 0, .25), 0 3px 6px rgba(0, 0, 0, .4); }
+  .pc.s0 { background: radial-gradient(circle at 35% 30%, #ff8199, #e0264b); color: #ffe3e9; }
+  .pc.s1 { background: radial-gradient(circle at 35% 30%, #ffffff, #c9c9d6); color: #5a3e9c; }
+  .pc.can { box-shadow: 0 0 0 3px #ffd23f, inset 0 -5px 0 rgba(0, 0, 0, .25); }
+</style>
+</head>
+<body>
+<script src="../shared/turn.js"></script>
+<script>
+// Board: 64 squares, row 0 at the top. Side 0 (red) starts at the bottom and moves up.
+// Pieces: 0/1 = men, 2/3 = kings (side = value % 2), -1 = empty.
+const DIRS = { 0: [[-1, -1], [-1, 1]], 1: [[1, -1], [1, 1]], K: [[-1, -1], [-1, 1], [1, -1], [1, 1]] };
+const on = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+
+function initBoard() {
+  const b = new Array(64).fill(-1);
+  for (let r = 0; r < 8; r++) for (let c = 0; c < 8; c++) {
+    if ((r + c) % 2 === 0) continue;
+    if (r < 3) b[r * 8 + c] = 1;
+    if (r > 4) b[r * 8 + c] = 0;
+  }
+  return b;
+}
+
+const isKing = p => p >= 2;
+const sideOf = p => p % 2;
+
+// Every legal move for a side as a list of squares [from, ..., to]. Jumps are compulsory.
+function legalMoves(b, side) {
+  const jumps = [], steps = [];
+  for (let i = 0; i < 64; i++) {
+    const p = b[i];
+    if (p < 0 || sideOf(p) !== side) continue;
+    const dirs = isKing(p) ? DIRS.K : DIRS[side];
+    collectJumps(b, i, p, dirs, [i], jumps);
+    const r = i >> 3, c = i & 7;
+    for (const [dr, dc] of dirs) if (on(r + dr, c + dc) && b[(r + dr) * 8 + c + dc] < 0) steps.push([i, (r + dr) * 8 + c + dc]);
+  }
+  return jumps.length ? jumps : steps;
+}
+function collectJumps(b, at, p, dirs, path, out) {
+  const r = at >> 3, c = at & 7, side = sideOf(p);
+  let found = false;
+  for (const [dr, dc] of dirs) {
+    const mr = r + dr, mc = c + dc, tr = r + 2 * dr, tc = c + 2 * dc;
+    if (!on(tr, tc)) continue;
+    const mid = b[mr * 8 + mc], to = tr * 8 + tc;
+    if (mid < 0 || sideOf(mid) === side || b[to] >= 0) continue;
+    found = true;
+    const nb = b.slice();
+    nb[to] = p; nb[at] = -1; nb[mr * 8 + mc] = -1;
+    const crowned = !isKing(p) && (tr === 0 || tr === 7);
+    if (crowned) out.push(path.concat(to)); // being crowned ends the turn
+    else collectJumps(nb, to, p, dirs, path.concat(to), out);
+  }
+  if (!found && path.length > 1) out.push(path);
+}
+function doMove(b, path) {
+  const nb = b.slice();
+  let p = nb[path[0]];
+  nb[path[0]] = -1;
+  for (let k = 1; k < path.length; k++) {
+    const a = path[k - 1], z = path[k];
+    if (Math.abs((z >> 3) - (a >> 3)) === 2) nb[((a >> 3) + (z >> 3)) / 2 * 8 + ((a & 7) + (z & 7)) / 2] = -1;
+  }
+  const end = path[path.length - 1];
+  if (!isKing(p) && ((end >> 3) === 0 || (end >> 3) === 7)) p += 2;
+  nb[end] = p;
+  return nb;
+}
+
+// ---------- computer ----------
+function evaluate(b, side) {
+  let v = 0;
+  for (let i = 0; i < 64; i++) {
+    const p = b[i];
+    if (p < 0) continue;
+    const r = i >> 3, c = i & 7;
+    let val = isKing(p) ? 170 : 100 + (sideOf(p) === 0 ? 7 - r : r) * 4;
+    if (c >= 2 && c <= 5 && r >= 2 && r <= 5) val += 6;
+    if (!isKing(p) && (sideOf(p) === 0 ? r === 7 : r === 0)) val += 8; // back row guards
+    v += sideOf(p) === side ? val : -val;
+  }
+  return v;
+}
+function search(b, side, depth, alpha, beta) {
+  const moves = legalMoves(b, side);
+  if (!moves.length) return -100000 - depth;
+  if (depth === 0) return evaluate(b, side);
+  let best = -Infinity;
+  moves.sort((x, y) => y.length - x.length);
+  for (const m of moves) {
+    const v = -search(doMove(b, m), 1 - side, depth - 1, -beta, -alpha);
+    if (v > best) best = v;
+    if (v > alpha) alpha = v;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+// ---------- UI ----------
+let api, sqs = [], path = [], lastS, lastV;
+
+GZ.turnGame({
+  id: 'checkers',
+  title: 'Checkers',
+  sides: [{ name: 'Red', color: '#ff4d6d' }, { name: 'White', color: '#f2f2f2' }],
+  modes: ['online', 'local', 'cpu'],
+  help: `<ul><li>Move diagonally forward one square on the purple squares.</li><li><b>Jump</b> over an enemy piece to capture it. Jumping is <b>required</b> when you can.</li>
+    <li>Keep jumping if another jump is possible.</li><li>Reach the far side to become a <b>king</b> 👑 — kings move backwards too.</li>
+    <li>Win by capturing or blocking every enemy piece.</li></ul>`,
+
+  init: () => ({ b: initBoard(), cur: 0, quiet: 0, last: [] }),
+  turn: s => s.cur,
+  apply(s, move, side) {
+    if (!Array.isArray(move) || this.result(s)) return null;
+    const key = move.join('-');
+    if (!legalMoves(s.b, side).some(m => m.join('-') === key)) return null;
+    const capture = move.some((sq, k) => k && Math.abs((sq >> 3) - (move[k - 1] >> 3)) === 2);
+    const manMoved = !isKing(s.b[move[0]]);
+    return { b: doMove(s.b, move), cur: 1 - side, quiet: capture || manMoved ? 0 : s.quiet + 1, last: move };
+  },
+  result(s) {
+    if (!legalMoves(s.b, s.cur).length) return { winner: 1 - s.cur, reason: s.b.some(p => p >= 0 && sideOf(p) === s.cur) ? 'no moves left' : 'all pieces captured' };
+    if (s.quiet >= 60) return { winner: null, reason: '30 moves each with only kings moving' };
+    return null;
+  },
+  score: s => [0, 1].map(i => s.b.filter(p => p >= 0 && sideOf(p) === i).length), // pieces left
+
+  ai(s, side, level) {
+    const moves = legalMoves(s.b, side);
+    if (level === 0 && Math.random() < 0.4) return moves[Math.floor(Math.random() * moves.length)];
+    const depth = [2, 4, 6][level];
+    let best = moves[0], bestV = -Infinity;
+    for (const m of moves) {
+      const v = -search(doMove(s.b, m), 1 - side, depth - 1, -Infinity, Infinity) + Math.random() * 4;
+      if (v > bestV) { bestV = v; best = m; }
+    }
+    return best;
+  },
+
+  mount(stage, a) {
+    api = a;
+    const board = document.createElement('div');
+    board.id = 'board';
+    for (let d = 0; d < 64; d++) {
+      const el = document.createElement('div');
+      el.onclick = () => tap(d);
+      board.appendChild(el);
+      sqs.push(el);
+    }
+    stage.appendChild(board);
+  },
+  draw(s, v) {
+    lastS = s; lastV = v;
+    const flip = v.mode !== 'local' && v.me === 1;
+    const moves = v.canPlay ? legalMoves(s.b, s.cur) : [];
+    const cands = moves.filter(m => path.every((sq, k) => m[k] === sq));
+    if (path.length && !cands.length) path = [];
+    const targets = path.length ? cands.map(m => m[path.length]).filter(x => x !== undefined) : [];
+    const movable = new Set(moves.map(m => m[0]));
+    sqs.forEach((el, d) => {
+      const i = flip ? 63 - d : d, r = i >> 3, c = i & 7, p = s.b[i];
+      el.className = 'sq ' + ((r + c) % 2 ? 'dk' : 'lt') + (s.last.includes(i) ? ' last' : '') + (path[path.length - 1] === i ? ' sel' : '') + (targets.includes(i) ? ' target' : '');
+      el.innerHTML = p >= 0 ? `<div class="pc s${sideOf(p)}${!path.length && movable.has(i) && moves.some(m => m.length > 2 || Math.abs((m[1] >> 3) - (m[0] >> 3)) === 2) ? ' can' : ''}">${isKing(p) ? '👑' : ''}</div>` : '';
+      el.dataset.sq = i;
+    });
+  },
+});
+
+function tap(d) {
+  if (!lastV || !lastV.canPlay) return;
+  const sq = +sqs[d].dataset.sq, s = lastS;
+  const moves = legalMoves(s.b, s.cur);
+  const ext = path.concat(sq);
+  const cands = moves.filter(m => ext.every((x, k) => m[k] === x));
+  if (path.length && cands.length) {
+    const done = cands.find(m => m.length === ext.length);
+    if (done && cands.length === 1) { path = []; api.play(done); return; }
+    path = ext;
+  } else if (moves.some(m => m[0] === sq)) {
+    path = [sq];
+  } else path = [];
+  api.redraw();
+}
+</script>
+</body>
+</html>

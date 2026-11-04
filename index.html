@@ -41,12 +41,28 @@
 // To add a game: make a folder in games/ and add an entry to a section here.
 const SECTIONS = [
   { title: 'Play with friends', games: [
-    { id: 'chess', name: 'Chess', emoji: '♟️', desc: 'Online with a friend, or vs the computer', tag: 'ONLINE' },
+    { id: 'chess', name: 'Chess', emoji: '♟️', desc: 'Online, vs computer, or pass & play', tag: 'ONLINE' },
+    { id: 'four-in-a-row', name: 'Four in a Row', emoji: '🔴', desc: 'Drop discs, get 4 in a line', tag: 'ONLINE' },
+    { id: 'hidden-fleet', name: 'Hidden Fleet', emoji: '🚢', desc: 'Find and sink the hidden ships', tag: 'ONLINE' },
+    { id: 'word-duel', name: 'Word Duel', emoji: '🔤', desc: 'Race to guess the secret word', tag: 'ONLINE' },
+    { id: 'trivia-battle', name: 'Trivia Battle', emoji: '❓', desc: 'Same questions — who knows more?', tag: 'ONLINE' },
+    { id: 'code-duel', name: 'Code Duel', emoji: '🔐', desc: 'Crack each other\'s secret codes', tag: 'ONLINE' },
+    { id: 'liars-dice', name: "Liar's Dice", emoji: '🎲', desc: 'Bluff, bid and call liar', tag: 'ONLINE' },
+    { id: 'checkers', name: 'Checkers', emoji: '⛀', desc: 'Jump, capture, get kings', tag: 'ONLINE' },
+    { id: 'flip', name: 'Flip', emoji: '⚫', desc: 'Trap and flip their discs', tag: 'ONLINE' },
+    { id: 'dots-boxes', name: 'Dots & Boxes', emoji: '⬜', desc: 'Close boxes to claim them', tag: 'ONLINE' },
+    { id: 'ultimate-ttt', name: 'Ultimate Tic-Tac-Toe', emoji: '❌', desc: '9 boards in one. Big brain.', tag: 'ONLINE' },
+    { id: 'five-in-a-row', name: 'Five in a Row', emoji: '⚪', desc: 'Get 5 stones in a line', tag: 'ONLINE' },
+    { id: 'mancala', name: 'Mancala', emoji: '🥜', desc: 'Sow seeds, capture, store', tag: 'ONLINE' },
     { id: 'tug-war', name: 'Tap War', emoji: '⚔️', desc: '2 players, 1 phone' },
   ]},
   { title: 'Brain games', games: [
+    { id: 'chess-puzzles', name: 'Chess Puzzles', emoji: '♞', desc: 'Find the checkmate' },
     { id: 'sudoku', name: 'Sudoku', emoji: '🧩', desc: 'Fresh puzzle every time' },
-    { id: 'code-breaker', name: 'Code Breaker', emoji: '🔐', desc: 'Crack the secret color code' },
+    { id: 'killer-sudoku', name: 'Killer Sudoku', emoji: '➕', desc: 'Sudoku with sum cages' },
+    { id: 'lights-out', name: 'Lights Out', emoji: '💡', desc: '50 levels of switch-flipping' },
+    { id: 'code-breaker', name: 'Code Breaker', emoji: '🧠', desc: 'Crack the secret color code' },
+    { id: 'math-rush', name: 'Math Rush', emoji: '⚡', desc: '60 seconds of quick math' },
     { id: 'merge', name: 'Merge', emoji: '🔢', desc: 'Slide & merge to 2048', bestKey: 'mergeBest' },
   ]},
   { title: 'Arcade', games: [
