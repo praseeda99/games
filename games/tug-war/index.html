@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Tap War</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b1a; overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    font-family: system-ui, -apple-system, sans-serif; color: #fff; }
+  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  #back { position: fixed; left: 8px; top: 50%; transform: translateY(-50%); z-index: 2; color: #fff; text-decoration: none;
+    font-size: 15px; font-weight: 700; background: rgba(11, 11, 26, .7); border-radius: 999px; padding: 6px 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<a id="back" href="../../">&#8249; exit</a>
+
+<script>
+// Two players, one phone. Lay it flat between you.
+// Each player mashes their half of the screen to push the line into the other side.
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W, H, DPR;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const TOP = { color: '#f3f', name: 'PINK' };
+const BOT = { color: '#3ff', name: 'BLUE' };
+const PUSH = 0.035;
+
+let state = 'ready';  // ready -> count -> play -> win
+let line, shown, count, winner, wins = { top: 0, bot: 0 }, waitT, ripples = [];
+
+function reset() { line = 0.5; shown = 0.5; count = 3; winner = null; waitT = 0; }
+reset();
+
+cv.addEventListener('pointerdown', e => {
+  const isTop = e.clientY < H * shown;
+  ripples.push({ x: e.clientX, y: e.clientY, life: 1, color: isTop ? TOP.color : BOT.color });
+
+  if (state === 'ready' || (state === 'win' && waitT <= 0)) {
+    reset(); state = 'count';
+    return;
+  }
+  if (state !== 'play') return;
+  // line is the boundary as a fraction of height: top player pushes it down, bottom pushes it up
+  line += isTop ? PUSH : -PUSH;
+  if (navigator.vibrate) navigator.vibrate(5);
+  if (line <= 0.04 || line >= 0.96) {
+    winner = line <= 0.04 ? 'bot' : 'top';
+    wins[winner]++;
+    state = 'win'; waitT = 1.2;
+    if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
+  }
+});
+
+// Text drawn twice: upside-down for the top player, normal for the bottom player
+function mirrored(text, size, yFromCenter, color) {
+  ctx.font = `800 ${size}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = color || '#fff';
+  ctx.save(); ctx.translate(W / 2, H * 0.25 - yFromCenter); ctx.rotate(Math.PI); ctx.fillText(text, 0, 0); ctx.restore();
+  ctx.fillText(text, W / 2, H * 0.75 + yFromCenter);
+}
+
+function draw(dt) {
+  shown += (line - shown) * Math.min(1, dt * 18);
+  const y = H * shown;
+
+  ctx.fillStyle = '#2a0f35'; ctx.fillRect(0, 0, W, y);
+  ctx.fillStyle = '#0d2b38'; ctx.fillRect(0, y, W, H - y);
+
+  // the glowing front line
+  ctx.shadowBlur = 25;
+  ctx.shadowColor = TOP.color; ctx.fillStyle = TOP.color; ctx.fillRect(0, y - 4, W, 4);
+  ctx.shadowColor = BOT.color; ctx.fillStyle = BOT.color; ctx.fillRect(0, y, W, 4);
+  ctx.shadowBlur = 0;
+
+  for (const r of ripples) {
+    r.life -= dt * 2.5;
+    ctx.strokeStyle = r.color; ctx.globalAlpha = Math.max(0, r.life); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(r.x, r.y, (1 - r.life) * 60 + 10, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ripples = ripples.filter(r => r.life > 0);
+
+  // scores
+  ctx.font = '800 22px system-ui, sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = BOT.color; ctx.fillText(wins.bot, W - 16, H - 30);
+  ctx.save(); ctx.translate(W - 16, 30); ctx.rotate(Math.PI); ctx.textAlign = 'left';
+  ctx.fillStyle = TOP.color; ctx.fillText(wins.top, 0, 0); ctx.restore();
+
+  if (state === 'ready') {
+    mirrored('TAP WAR', 44, -30);
+    mirrored('Mash your side to push!', 18, 20, 'rgba(255,255,255,.75)');
+    mirrored('Tap to start', 16, 55, 'rgba(255,255,255,.5)');
+  } else if (state === 'count') {
+    count -= dt;
+    if (count <= 0) state = 'play';
+    else mirrored(Math.ceil(count), 90, 0);
+  } else if (state === 'play' && count > -0.6) {
+    count -= dt;
+    mirrored('GO!', 70, 0);
+  } else if (state === 'win') {
+    waitT -= dt;
+    const w = winner === 'top' ? TOP : BOT;
+    mirrored(w.name + ' WINS!', 42, -20, w.color);
+    if (waitT <= 0) mirrored('Tap for rematch', 16, 30, 'rgba(255,255,255,.6)');
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  draw(dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Neon Snake</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b1a; overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    font-family: system-ui, -apple-system, sans-serif; color: #fff; }
+  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 12px) 16px 0;
+    display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 22px; pointer-events: none; }
+  #hud .best { font-size: 15px; opacity: .6; }
+  #back { pointer-events: auto; color: #fff; text-decoration: none; font-size: 26px; opacity: .7; padding: 0 6px; }
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; text-align: center; padding: 24px; background: rgba(11, 11, 26, .8); }
+  .hidden { display: none !important; }
+  h1 { margin: 0; font-size: 48px; letter-spacing: 2px; line-height: 1.05;
+    background: linear-gradient(90deg, #5f8, #3ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  p { margin: 0; opacity: .8; font-size: 17px; line-height: 1.5; }
+  .big { font-size: 64px; font-weight: 800; }
+  button { font: inherit; font-size: 22px; font-weight: 800; padding: 14px 44px; border: 0; border-radius: 999px;
+    color: #0b0b1a; background: linear-gradient(90deg, #5f8, #3ff); box-shadow: 0 0 30px rgba(80, 255, 140, .35); }
+  button:active { transform: scale(.96); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <a id="back" href="../../">&#8249;</a>
+  <span id="score">0</span>
+  <span class="best">BEST <span id="best">0</span></span>
+</div>
+
+<div id="menu" class="screen">
+  <h1>NEON<br>SNAKE</h1>
+  <p>Swipe to turn.<br>Eat the dots, don't hit the walls<br>or yourself. Gets faster as you grow.</p>
+  <button id="play">PLAY</button>
+</div>
+
+<div id="over" class="screen hidden">
+  <p>SCORE</p>
+  <div class="big" id="final">0</div>
+  <p id="newbest"></p>
+  <button id="again">AGAIN</button>
+</div>
+
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+let W, H, DPR;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  layout();
+}
+
+const COLS = 16;
+let ROWS = 24, cell, ox, oy;
+function layout() {
+  const top = 60, pad = 12;
+  cell = Math.floor(Math.min((W - pad * 2) / COLS, (H - top - pad * 2) / ROWS));
+  ox = Math.floor((W - cell * COLS) / 2);
+  oy = Math.floor(top + (H - top - cell * ROWS) / 2);
+}
+function pickRows() {
+  // Fit the board to the phone's shape, decided once per game
+  const top = 60, pad = 12;
+  const c = (Math.min(window.innerWidth, 600) - pad * 2) / COLS;
+  ROWS = Math.max(16, Math.min(32, Math.floor((window.innerHeight - top - pad * 2) / c)));
+}
+pickRows();
+window.addEventListener('resize', resize);
+resize();
+
+let best = +localStorage.getItem('snakeBest') || 0;
+$('best').textContent = best;
+
+const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+let state = 'menu', snake, dir, queue, food, score, tickMs, acc, flash, deadT;
+
+function reset() {
+  const cy = Math.floor(ROWS / 2);
+  snake = [{ x: 6, y: cy }, { x: 5, y: cy }, { x: 4, y: cy }];
+  dir = 'right'; queue = [];
+  score = 0; tickMs = 140; acc = 0; flash = 0; deadT = 0;
+  placeFood();
+}
+
+function placeFood() {
+  do {
+    food = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+  } while (snake.some(s => s.x === food.x && s.y === food.y));
+}
+
+function turn(d) {
+  const last = queue.length ? queue[queue.length - 1] : dir;
+  const [ax, ay] = DIRS[last], [bx, by] = DIRS[d];
+  if (ax + bx === 0 && ay + by === 0) return; // can't reverse into yourself
+  if (d === last) return;
+  if (queue.length < 2) queue.push(d);
+}
+
+// Swipe input: each time the finger travels far enough, that's a turn
+let sw = null;
+cv.addEventListener('pointerdown', e => sw = { x: e.clientX, y: e.clientY });
+window.addEventListener('pointermove', e => {
+  if (!sw || state !== 'play') return;
+  const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+  if (Math.hypot(dx, dy) < 22) return;
+  turn(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+  sw = { x: e.clientX, y: e.clientY };
+});
+window.addEventListener('pointerup', () => sw = null);
+window.addEventListener('keydown', e => {
+  const k = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', s: 'down', a: 'left', d: 'right' }[e.key];
+  if (k && state === 'play') turn(k);
+});
+
+function start() {
+  pickRows(); layout();
+  reset();
+  state = 'play';
+  $('menu').classList.add('hidden');
+  $('over').classList.add('hidden');
+}
+$('play').onclick = start;
+$('again').onclick = start;
+
+function step() {
+  if (queue.length) dir = queue.shift();
+  const [dx, dy] = DIRS[dir];
+  const head = { x: snake[0].x + dx, y: snake[0].y + dy };
+  const eating = head.x === food.x && head.y === food.y;
+  const body = eating ? snake : snake.slice(0, -1); // tail moves away unless we grow
+  if (head.x < 0 || head.y < 0 || head.x >= COLS || head.y >= ROWS || body.some(s => s.x === head.x && s.y === head.y)) {
+    state = 'dying'; deadT = 0.8; flash = 1;
+    if (navigator.vibrate) navigator.vibrate(120);
+    return;
+  }
+  snake.unshift(head);
+  if (eating) {
+    score += 10;
+    tickMs = Math.max(65, tickMs - 3);
+    flash = 0.4;
+    if (navigator.vibrate) navigator.vibrate(10);
+    placeFood();
+  } else {
+    snake.pop();
+  }
+}
+
+function gameOver() {
+  state = 'over';
+  $('final').textContent = score;
+  if (score > best) {
+    best = score;
+    localStorage.setItem('snakeBest', best);
+    $('best').textContent = best;
+    $('newbest').textContent = 'NEW BEST!';
+  } else {
+    $('newbest').textContent = 'Best: ' + best;
+  }
+  $('over').classList.remove('hidden');
+}
+
+function draw(now) {
+  ctx.fillStyle = '#0b0b1a';
+  ctx.fillRect(0, 0, W, H);
+
+  // board
+  ctx.fillStyle = '#100e26';
+  ctx.fillRect(ox, oy, cell * COLS, cell * ROWS);
+  ctx.strokeStyle = 'rgba(80, 255, 140, .35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ox - 1, oy - 1, cell * COLS + 2, cell * ROWS + 2);
+
+  // food pulses
+  const pulse = 0.75 + Math.sin(now / 150) * 0.15;
+  ctx.shadowColor = '#f3f'; ctx.shadowBlur = 18;
+  ctx.fillStyle = '#f5f';
+  ctx.beginPath();
+  ctx.arc(ox + (food.x + .5) * cell, oy + (food.y + .5) * cell, cell * .4 * pulse, 0, Math.PI * 2);
+  ctx.fill();
+
+  // snake: head bright, fades toward the tail
+  ctx.shadowColor = '#5f8'; ctx.shadowBlur = 12;
+  snake.forEach((s, i) => {
+    const k = 1 - i / (snake.length + 4);
+    ctx.fillStyle = state === 'dying' ? `rgba(255, 80, 80, ${k})` : `hsla(${150 - i * 1.5}, 100%, ${45 + k * 25}%, 1)`;
+    const g = i === 0 ? 1 : 2;
+    ctx.beginPath();
+    ctx.roundRect(ox + s.x * cell + g, oy + s.y * cell + g, cell - g * 2, cell - g * 2, cell * .3);
+    ctx.fill();
+  });
+  ctx.shadowBlur = 0;
+
+  if (flash > 0) {
+    ctx.fillStyle = state === 'dying' ? `rgba(255, 50, 80, ${flash * .3})` : `rgba(80, 255, 140, ${flash * .12})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  $('score').textContent = score;
+}
+
+reset();
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(100, now - last);
+  last = now;
+  if (state === 'play') {
+    acc += dt;
+    while (acc >= tickMs && state === 'play') { acc -= tickMs; step(); }
+  }
+  if (state === 'dying') {
+    deadT -= dt / 1000;
+    if (deadT <= 0) gameOver();
+  }
+  flash = Math.max(0, flash - dt / 600);
+  draw(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

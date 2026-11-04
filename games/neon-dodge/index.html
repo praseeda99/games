@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Neon Dodge</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b1a; overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    font-family: system-ui, -apple-system, sans-serif; color: #fff; }
+  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 12px) 16px 0;
+    display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 22px; pointer-events: none; }
+  #hud .best { font-size: 15px; opacity: .6; }
+  #back { pointer-events: auto; color: #fff; text-decoration: none; font-size: 26px; opacity: .7; padding: 0 6px; }
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; text-align: center; padding: 24px; background: rgba(11, 11, 26, .78); }
+  .hidden { display: none !important; }
+  h1 { margin: 0; font-size: 48px; letter-spacing: 2px; line-height: 1.05;
+    background: linear-gradient(90deg, #3ff, #f3f); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  p { margin: 0; opacity: .8; font-size: 17px; line-height: 1.5; }
+  .big { font-size: 64px; font-weight: 800; }
+  button { font: inherit; font-size: 22px; font-weight: 800; padding: 14px 44px; border: 0; border-radius: 999px;
+    color: #0b0b1a; background: linear-gradient(90deg, #3ff, #f3f); box-shadow: 0 0 30px rgba(255, 60, 255, .4); }
+  button:active { transform: scale(.96); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <a id="back" href="../../">&#8249;</a>
+  <span id="score">0</span>
+  <span class="best">BEST <span id="best">0</span></span>
+</div>
+
+<div id="menu" class="screen">
+  <h1>NEON<br>DODGE</h1>
+  <p>Drag anywhere to move.<br>Dodge the orbs, grab the stars.<br>Close calls give bonus points.</p>
+  <button id="play">PLAY</button>
+</div>
+
+<div id="over" class="screen hidden">
+  <p>SCORE</p>
+  <div class="big" id="final">0</div>
+  <p id="newbest"></p>
+  <button id="again">AGAIN</button>
+</div>
+
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+let W, H, DPR;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+let best = +localStorage.getItem('neonDodgeBest') || 0;
+$('best').textContent = best;
+
+let state = 'menu';
+let player, orbs, stars, parts, popups, score, t, spawnT, starT, shake, deadT;
+const keys = {};
+
+function reset() {
+  player = { x: W / 2, y: H * 0.75, r: 13 };
+  orbs = []; stars = []; parts = []; popups = [];
+  score = 0; t = 0; spawnT = 0; starT = 2; shake = 0; deadT = 0;
+}
+reset();
+
+// Relative drag: the orb moves with your finger's motion, so your thumb never covers it.
+let drag = null;
+cv.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX, y: e.clientY };
+});
+window.addEventListener('pointermove', e => {
+  if (!drag || state !== 'play') return;
+  player.x += (e.clientX - drag.x) * 1.4;
+  player.y += (e.clientY - drag.y) * 1.4;
+  drag.x = e.clientX; drag.y = e.clientY;
+  clampPlayer();
+});
+window.addEventListener('pointerup', () => drag = null);
+window.addEventListener('pointercancel', () => drag = null);
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+function clampPlayer() {
+  player.x = Math.max(player.r, Math.min(W - player.r, player.x));
+  player.y = Math.max(H * 0.15, Math.min(H - player.r - 10, player.y));
+}
+
+function start() {
+  reset();
+  state = 'play';
+  $('menu').classList.add('hidden');
+  $('over').classList.add('hidden');
+}
+$('play').onclick = start;
+$('again').onclick = start;
+
+function burst(x, y, hue, n, speed) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = Math.random() * speed;
+    parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, hue });
+  }
+}
+function popup(x, y, text, hue) { popups.push({ x, y, text, hue, life: 1 }); }
+
+function die() {
+  state = 'dying';
+  deadT = 0.9;
+  shake = 18;
+  burst(player.x, player.y, 190, 60, 420);
+  if (navigator.vibrate) navigator.vibrate(120);
+}
+
+function gameOver() {
+  state = 'over';
+  const s = Math.floor(score);
+  $('final').textContent = s;
+  if (s > best) {
+    best = s;
+    localStorage.setItem('neonDodgeBest', best);
+    $('best').textContent = best;
+    $('newbest').textContent = 'NEW BEST!';
+  } else {
+    $('newbest').textContent = 'Best: ' + best;
+  }
+  $('over').classList.remove('hidden');
+}
+
+function update(dt) {
+  if (state === 'play') {
+    t += dt;
+    score += dt * 10;
+
+    const kSpeed = 380 * dt;
+    if (keys.ArrowLeft || keys.a) player.x -= kSpeed;
+    if (keys.ArrowRight || keys.d) player.x += kSpeed;
+    if (keys.ArrowUp || keys.w) player.y -= kSpeed;
+    if (keys.ArrowDown || keys.s) player.y += kSpeed;
+    clampPlayer();
+
+    // Difficulty ramps up over ~90 seconds
+    const diff = Math.min(1, t / 90);
+    spawnT -= dt;
+    if (spawnT <= 0) {
+      spawnT = 0.75 - diff * 0.55 + Math.random() * 0.2;
+      const r = 10 + Math.random() * (18 + diff * 22);
+      orbs.push({
+        x: Math.random() * W, y: -r, r,
+        vy: 160 + diff * 260 + Math.random() * 120,
+        vx: (Math.random() - 0.5) * (40 + diff * 120),
+        hue: 300 + Math.random() * 60, near: false,
+      });
+    }
+    starT -= dt;
+    if (starT <= 0) {
+      starT = 2.5 + Math.random() * 2.5;
+      stars.push({ x: 30 + Math.random() * (W - 60), y: -20, vy: 140, spin: 0 });
+    }
+  }
+
+  if (state === 'dying') {
+    deadT -= dt;
+    if (deadT <= 0) gameOver();
+  }
+
+  for (const o of orbs) {
+    o.x += o.vx * dt; o.y += o.vy * dt;
+    if (o.x < o.r || o.x > W - o.r) o.vx *= -1;
+    if (state !== 'play') continue;
+    const d = Math.hypot(o.x - player.x, o.y - player.y);
+    if (d < o.r * 0.85 + player.r) { die(); break; }
+    if (!o.near && d < o.r + player.r + 22 && o.y > player.y) {
+      o.near = true;
+      score += 5;
+      popup(player.x, player.y - 24, 'CLOSE! +5', 60);
+    }
+  }
+  orbs = orbs.filter(o => o.y < H + o.r + 10);
+
+  for (const s of stars) {
+    s.y += s.vy * dt; s.spin += dt * 3;
+    if (state === 'play' && Math.hypot(s.x - player.x, s.y - player.y) < 26) {
+      s.got = true;
+      score += 25;
+      burst(s.x, s.y, 50, 20, 200);
+      popup(s.x, s.y - 10, '+25', 50);
+      if (navigator.vibrate) navigator.vibrate(15);
+    }
+  }
+  stars = stars.filter(s => !s.got && s.y < H + 30);
+
+  for (const p of parts) {
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= 0.96; p.vy *= 0.96;
+    p.life -= dt * 1.4;
+  }
+  parts = parts.filter(p => p.life > 0);
+
+  for (const p of popups) { p.y -= 40 * dt; p.life -= dt * 1.2; }
+  popups = popups.filter(p => p.life > 0);
+
+  shake = Math.max(0, shake - dt * 40);
+
+  // Player trail
+  if (state === 'play' && Math.random() < 0.6) {
+    parts.push({ x: player.x, y: player.y + player.r, vx: (Math.random() - 0.5) * 30, vy: 90, life: 0.5, hue: 185 });
+  }
+}
+
+function glowCircle(x, y, r, color, blur) {
+  ctx.shadowColor = color; ctx.shadowBlur = blur;
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawStar(x, y, r, rot) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.shadowColor = '#ffd23f'; ctx.shadowBlur = 20;
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+    ctx.lineTo(Math.sin(a) * rr, -Math.cos(a) * rr);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// Background grid scrolls to give a sense of speed
+let gridY = 0;
+function drawBg(dt) {
+  ctx.fillStyle = '#0b0b1a';
+  ctx.fillRect(0, 0, W, H);
+  gridY = (gridY + dt * (state === 'play' ? 60 + Math.min(t, 90) * 2 : 30)) % 40;
+  ctx.strokeStyle = 'rgba(80, 60, 200, 0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x < W; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = gridY - 40; y < H; y += 40) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+}
+
+function draw(dt) {
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+  drawBg(dt);
+
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of parts) {
+    ctx.fillStyle = `hsla(${p.hue}, 100%, 60%, ${p.life})`;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  for (const s of stars) drawStar(s.x, s.y, 13, s.spin);
+  for (const o of orbs) glowCircle(o.x, o.y, o.r, `hsl(${o.hue}, 100%, 60%)`, 24);
+  if (state === 'play' || state === 'menu') {
+    glowCircle(player.x, player.y, player.r, '#3ff', 30);
+    glowCircle(player.x, player.y, player.r * 0.5, '#fff', 0);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 18px system-ui, sans-serif';
+  for (const p of popups) {
+    ctx.fillStyle = `hsla(${p.hue}, 100%, 65%, ${p.life})`;
+    ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.restore();
+
+  $('score').textContent = Math.floor(score);
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw(dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>

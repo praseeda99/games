@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="../../manifest.json">
+<link rel="apple-touch-icon" href="../../icons/icon-192.png">
+<title>Merge</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0b1a; overflow: hidden; touch-action: none;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    font-family: system-ui, -apple-system, sans-serif; color: #fff; }
+  body { display: flex; flex-direction: column; align-items: center; padding: calc(env(safe-area-inset-top) + 12px) 16px 16px; box-sizing: border-box; }
+  #top { width: 100%; max-width: 440px; display: flex; align-items: center; gap: 10px; }
+  #back { color: #fff; text-decoration: none; font-size: 26px; opacity: .7; padding: 0 6px; }
+  h1 { margin: 0; flex: 1; font-size: 30px;
+    background: linear-gradient(90deg, #fc3, #f5a); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .box { background: #1c1640; border-radius: 12px; padding: 6px 12px; text-align: center; min-width: 58px; }
+  .box small { display: block; font-size: 11px; opacity: .6; font-weight: 700; }
+  .box b { font-size: 20px; }
+  #hint { opacity: .55; font-size: 14px; margin: 14px 0; text-align: center; }
+  #board { position: relative; width: min(92vw, 440px); aspect-ratio: 1; background: #1c1640; border-radius: 18px;
+    padding: 10px; box-sizing: border-box; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .cell { border-radius: 12px; background: #120f2b; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: clamp(20px, 8vw, 38px); }
+  .pop { animation: pop .16s ease-out; }
+  @keyframes pop { 0% { transform: scale(.6); } 70% { transform: scale(1.1); } 100% { transform: scale(1); } }
+  #over { position: absolute; inset: 0; border-radius: 18px; background: rgba(11, 11, 26, .85); display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  #over p { margin: 0; font-size: 28px; font-weight: 800; }
+  .hidden { display: none !important; }
+  button { font: inherit; font-size: 18px; font-weight: 800; padding: 12px 32px; border: 0; border-radius: 999px;
+    color: #0b0b1a; background: linear-gradient(90deg, #fc3, #f5a); }
+  button:active { transform: scale(.96); }
+  #restart { margin-top: 18px; background: #1c1640; color: #fff; font-size: 15px; padding: 10px 24px; }
+</style>
+</head>
+<body>
+<div id="top">
+  <a id="back" href="../../">&#8249;</a>
+  <h1>MERGE</h1>
+  <div class="box"><small>SCORE</small><b id="score">0</b></div>
+  <div class="box"><small>BEST</small><b id="best">0</b></div>
+</div>
+<div id="hint">Swipe to slide. Matching numbers merge. Reach 2048!</div>
+<div id="board">
+  <div id="over" class="hidden"><p id="msg">No moves left</p><button id="again">PLAY AGAIN</button></div>
+</div>
+<button id="restart">New game</button>
+
+<script>
+const $ = id => document.getElementById(id);
+const boardEl = $('board');
+const cells = [];
+for (let i = 0; i < 16; i++) {
+  const d = document.createElement('div');
+  d.className = 'cell';
+  boardEl.insertBefore(d, $('over'));
+  cells.push(d);
+}
+
+// tile colors climb from cool to hot as numbers grow
+const COLORS = {
+  2: ['#2a2360', '#fff'], 4: ['#33307a', '#fff'], 8: ['#3a5bd9', '#fff'], 16: ['#2fa8e8', '#fff'],
+  32: ['#25d0c0', '#0b0b1a'], 64: ['#5fe07a', '#0b0b1a'], 128: ['#c8e83a', '#0b0b1a'], 256: ['#ffcc33', '#0b0b1a'],
+  512: ['#ff9a3a', '#0b0b1a'], 1024: ['#ff5a6a', '#fff'], 2048: ['#ff3fb4', '#fff'],
+};
+
+let board, score, best = +localStorage.getItem('mergeBest') || 0, won;
+const SAVE = 'mergeSave';
+
+function newGame() {
+  board = Array(16).fill(0);
+  score = 0; won = false;
+  addTile(); addTile();
+  $('over').classList.add('hidden');
+  render(new Set(board.map((v, i) => v ? i : -1)));
+  save();
+}
+
+function addTile() {
+  const empty = board.map((v, i) => v ? -1 : i).filter(i => i >= 0);
+  if (!empty.length) return -1;
+  const i = empty[Math.floor(Math.random() * empty.length)];
+  board[i] = Math.random() < 0.9 ? 2 : 4;
+  return i;
+}
+
+// For each direction, list the 4 rows of cell indices, ordered in the direction tiles slide toward
+function lines(dir) {
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const line = [];
+    for (let j = 0; j < 4; j++) {
+      let r, c;
+      if (dir === 'left') { r = i; c = j; }
+      else if (dir === 'right') { r = i; c = 3 - j; }
+      else if (dir === 'up') { r = j; c = i; }
+      else { r = 3 - j; c = i; }
+      line.push(r * 4 + c);
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function move(dir) {
+  if (!$('over').classList.contains('hidden')) return;
+  let moved = false;
+  const popped = new Set();
+  for (const line of lines(dir)) {
+    const vals = line.map(k => board[k]).filter(v => v);
+    const res = [];
+    for (let i = 0; i < vals.length; i++) {
+      if (vals[i] === vals[i + 1]) {
+        res.push(vals[i] * 2);
+        score += vals[i] * 2;
+        popped.add(line[res.length - 1]);
+        i++;
+      } else {
+        res.push(vals[i]);
+      }
+    }
+    while (res.length < 4) res.push(0);
+    line.forEach((k, j) => {
+      if (board[k] !== res[j]) moved = true;
+      board[k] = res[j];
+    });
+  }
+  if (!moved) return;
+  popped.add(addTile());
+  if (score > best) { best = score; localStorage.setItem('mergeBest', best); }
+  if (navigator.vibrate) navigator.vibrate(8);
+  render(popped);
+  save();
+
+  if (!won && board.includes(2048)) {
+    won = true;
+    showOver('You made 2048! 🎉', 'KEEP GOING');
+  } else if (!canMove()) {
+    localStorage.removeItem(SAVE);
+    showOver('No moves left', 'PLAY AGAIN');
+  }
+}
+
+function canMove() {
+  for (let i = 0; i < 16; i++) {
+    if (!board[i]) return true;
+    if (i % 4 < 3 && board[i] === board[i + 1]) return true;
+    if (i < 12 && board[i] === board[i + 4]) return true;
+  }
+  return false;
+}
+
+function showOver(text, btn) {
+  $('msg').textContent = text;
+  $('again').textContent = btn;
+  $('over').classList.remove('hidden');
+}
+$('again').onclick = () => {
+  if (canMove() && won) $('over').classList.add('hidden');
+  else newGame();
+};
+$('restart').onclick = newGame;
+
+function render(popped = new Set()) {
+  board.forEach((v, i) => {
+    const el = cells[i];
+    el.textContent = v || '';
+    const [bg, fg] = COLORS[v] || (v ? ['#fff', '#0b0b1a'] : ['#120f2b', '#fff']);
+    el.style.background = bg;
+    el.style.color = fg;
+    el.style.fontSize = v >= 1024 ? 'clamp(16px, 6vw, 30px)' : '';
+    el.style.boxShadow = v >= 128 ? `0 0 20px ${bg}88` : 'none';
+    el.classList.remove('pop');
+    if (popped.has(i)) { void el.offsetWidth; el.classList.add('pop'); }
+  });
+  $('score').textContent = score;
+  $('best').textContent = best;
+}
+
+// Your game in progress is kept, so closing the app doesn't lose it
+function save() { localStorage.setItem(SAVE, JSON.stringify({ board, score, won })); }
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SAVE));
+    if (s && s.board.length === 16) { ({ board, score, won } = s); render(); return true; }
+  } catch (e) {}
+  return false;
+}
+
+let sw = null;
+document.addEventListener('pointerdown', e => sw = { x: e.clientX, y: e.clientY });
+document.addEventListener('pointerup', e => {
+  if (!sw) return;
+  const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+  sw = null;
+  if (Math.hypot(dx, dy) < 25) return;
+  move(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+});
+document.addEventListener('keydown', e => {
+  const k = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.key];
+  if (k) { e.preventDefault(); move(k); }
+});
+
+if (!load()) newGame();
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('../../sw.js');
+</script>
+</body>
+</html>
